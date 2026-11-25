@@ -78,6 +78,8 @@ jobs:
           security unlock-keychain -p ci "$KEYCHAIN"
           security import cert.p12 -k "$KEYCHAIN" -P ci -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN" > /dev/null
+          # codesign only finds identities in keychains on the user search list.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm -f key.pem cert.p12
 
           # The cert is untrusted, so address the identity by its SHA-1 hash.
@@ -112,6 +114,7 @@ jobs:
   release:
     name: Publish "latest" release
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
