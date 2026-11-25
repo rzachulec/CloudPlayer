@@ -10,3 +10,6 @@ xcuserdata/
 
 # Python
 __pycache__/
+
+# Claude Code
+.claude/
