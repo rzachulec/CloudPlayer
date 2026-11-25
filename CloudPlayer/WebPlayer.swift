@@ -1,0 +1,676 @@
+import AppKit
+import SwiftUI
+import WebKit
+
+enum RepeatMode: String { case none, one, all }
+
+enum SwipeDirection: Equatable { case next, previous }
+
+/// Directional page-swipe overlay used when following the Now Playing track page.
+/// The outgoing snapshot begins sliding immediately on Next/Prev to give instant UI response
+/// while buying time for the incoming track page to paint before it glides into view.
+struct PageSwipeTransition: Equatable {
+    let id: Int
+    let direction: SwipeDirection
+    let snapshot: NSImage
+    var outgoingExited: Bool
+    var incomingReady: Bool
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.direction == rhs.direction
+            && lhs.outgoingExited == rhs.outgoingExited && lhs.incomingReady == rhs.incomingReady
+    }
+}
+
+/// A SoundCloud notification ("… was saved to your Library"), shown in the sidebar.
+struct Toast: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
+    let artworkURL: URL?
+}
+
+/// Position and state of the native Liquid Glass play button hovering over a tile.
+struct HoverPlay: Equatable {
+    let x: CGFloat
+    let y: CGFloat
+    let size: CGFloat
+    let isPlaying: Bool
+}
+
+struct TrackState: Equatable {
+    var hasTrack = false
+    var title = ""
+    var artist = ""
+    var trackPath = ""
+    var artistPath = ""
+    var artworkURL: URL?
+    var isPlaying = false
+    var position: Double = 0
+    var duration: Double = 0
+    var isLiked = false
+    var shuffle = false
+    var repeatMode = RepeatMode.none
+    var queueVisible = false
+}
+
+/// Owns the SoundCloud web view (the audio engine) and exposes its state + controls.
+@MainActor
+final class WebPlayer: NSObject, ObservableObject {
+    @Published private(set) var state = TrackState()
+    @Published private(set) var currentPath = "/"
+    @Published private(set) var canGoBack = false
+    @Published private(set) var canGoForward = false
+    @Published private(set) var profilePath = ""
+    @Published private(set) var volume: Double
+    @Published var toast: Toast?
+    @Published private(set) var hoverPlay: HoverPlay?
+    @Published private(set) var pageSwipe: PageSwipeTransition?
+    private var lastTrackPath = ""
+    private var pendingSwipeDirection: (dir: SwipeDirection, at: Date)?
+    private var swipeGeneration = 0
+    private var swipeTargetPath = ""
+    private var swipeFallbackWork: DispatchWorkItem?
+    private var hoverLeaveWork: DispatchWorkItem?
+    private var scrollMonitor: Any?
+    var isHoveringPlayButton = false {
+        didSet {
+            guard isHoveringPlayButton != oldValue else { return }
+            if isHoveringPlayButton {
+                scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                    guard let self, self.isHoveringPlayButton, event.window == self.webView.window else { return event }
+                    self.hoverPlay = nil
+                    self.isHoveringPlayButton = false
+                    self.webView.scrollWheel(with: event)
+                    return nil
+                }
+            } else if let m = scrollMonitor {
+                NSEvent.removeMonitor(m)
+                scrollMonitor = nil
+            }
+        }
+    }
+
+    let webView: WKWebView
+    private var popups: [NSWindow] = []
+    private var theme: Theme.Snapshot
+    private var observations: [NSKeyValueObservation] = []
+    #if DEBUG
+    private var debugFirstLoad = true
+    fileprivate var debugNavGeneration = 0
+    #endif
+
+    static let home = URL(string: "https://soundcloud.com/discover")!
+    static let customCSSURL: URL = FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("CloudPlayer/custom.css")
+
+    override init() {
+        volume = UserDefaults.standard.object(forKey: "volume") as? Double ?? 1
+        theme = Theme.current()
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()   // persistent cookies → stay logged in
+        config.applicationNameForUserAgent = "Version/18.0 Safari/605.1.15"
+        webView = PageWebView(frame: .zero, configuration: config)
+        super.init()
+        installUserScripts()
+        webView.configuration.userContentController.add(WeakMessageHandler(self), name: "cp")
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        webView.allowsBackForwardNavigationGestures = true
+        webView.isInspectable = true            // right-click → Inspect Element
+        webView.underPageBackgroundColor = .textBackgroundColor
+
+        observations = [
+            webView.observe(\.url, options: [.initial, .new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated {
+                    guard let self, let url = wv.url else { return }
+                    let path = url.path.isEmpty ? "/" : url.path
+                    let full = url.query.map { "\(path)?\($0)" } ?? path
+                    if self.currentPath != full {
+                        self.currentPath = full
+                        #if DEBUG
+                        self.scheduleNavigationDump()
+                        #endif
+                    }
+                }
+            },
+            webView.observe(\.canGoBack, options: [.initial, .new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.canGoBack = wv.canGoBack }
+            },
+            webView.observe(\.canGoForward, options: [.initial, .new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated { self?.canGoForward = wv.canGoForward }
+            },
+            // Light/dark switches
+            NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refreshTheme() }
+            },
+        ]
+        // Accent colour changes
+        NotificationCenter.default.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshTheme() }
+        }
+    }
+
+    func load() {
+        Task {
+            // Install the blocklist before the first request so nothing slips through.
+            var block = true
+            #if DEBUG
+            block = !UserDefaults.standard.bool(forKey: "cpNoBlocklist")   // debug: -cpNoBlocklist YES
+            #endif
+            if block { await Blocklist.install(on: webView.configuration.userContentController) }
+            var url = Self.home
+            #if DEBUG
+            if let path = UserDefaults.standard.string(forKey: "cpStartPath"),
+               let u = URL(string: "https://soundcloud.com" + path) { url = u }
+            #endif
+            webView.load(URLRequest(url: url))
+        }
+    }
+
+    // MARK: Navigation
+
+    /// Navigates inside SoundCloud's single-page app (keeps playback going).
+    func open(_ path: String) {
+        guard !path.isEmpty else { return }
+        webView.evaluateJavaScript("window.CP ? CP.open(\(Injected.js(path))) : location.assign(\(Injected.js(path)))", completionHandler: nil)
+    }
+
+    func search(_ query: String) {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty, let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
+        open("/search?q=\(encoded)")
+    }
+
+    func goBack() { webView.goBack() }
+    func goForward() { webView.goForward() }
+    func reload() { webView.reload() }
+
+    /// Clears the app's cookies/storage (logs out of SoundCloud) and returns to the start page.
+    func signOut() {
+        let store = webView.configuration.websiteDataStore
+        store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) { [weak self] in
+            guard let self else { return }
+            self.state = TrackState()
+            self.profilePath = ""
+            self.webView.load(URLRequest(url: URL(string: "https://soundcloud.com/")!))
+        }
+    }
+
+    // MARK: Playback commands
+
+    func playPause() { cmd("toggle") }
+    func play() { if !state.isPlaying { playPause() } }
+    func pause() { if state.isPlaying { playPause() } }
+    func next() {
+        pendingSwipeDirection = (.next, Date())
+        if isViewingNowPlaying { startImmediateSwipe(direction: .next) }
+        cmd("next")
+    }
+    func previous() {
+        pendingSwipeDirection = (.previous, Date())
+        // Pressing Previous past ~3s restarts the current track at 0:00 instead of changing tracks.
+        if isViewingNowPlaying && state.position <= 3.5 { startImmediateSwipe(direction: .previous) }
+        cmd("prev")
+    }
+
+    private var isViewingNowPlaying: Bool {
+        let cur = Self.normPath(currentPath)
+        let track = Self.normPath(state.trackPath.isEmpty ? lastTrackPath : state.trackPath)
+        return !track.isEmpty && (cur == track || (!swipeTargetPath.isEmpty && swipeTargetPath == track))
+    }
+    func toggleLike() { cmd("like") }
+    func toggleShuffle() { cmd("shuffle") }
+    func cycleRepeat() { cmd("repeat") }
+    func toggleQueue() { cmd("queue") }
+
+    func seek(fraction: Double) { cmd("seek", min(max(fraction, 0), 1)) }
+
+    func seek(seconds: Double) {
+        guard state.duration > 0 else { return }
+        seek(fraction: seconds / state.duration)
+    }
+
+    func setVolume(_ v: Double) {
+        let v = min(max(v, 0), 1)
+        volume = v
+        UserDefaults.standard.set(v, forKey: "volume")
+        cmd("volume", v)
+    }
+
+    private func cmd(_ name: String, _ arg: Double? = nil) {
+        run("CP.cmd('\(name)'\(arg.map { ", \($0)" } ?? ""))")
+    }
+
+    // MARK: Styling
+
+    func reloadCustomCSS() {
+        let css = (try? String(contentsOf: Self.customCSSURL, encoding: .utf8)) ?? ""
+        run("CP.setCustomCSS(\(Injected.js(css)))")
+    }
+
+    private func refreshTheme() {
+        let t = Theme.current()
+        guard t != theme else { return }
+        theme = t
+        installUserScripts()   // for future page loads
+        run("CP.setTheme(\(t.isDark), \(Injected.js(Theme.css(t))), \(Injected.js(Theme.frameCSS(t))))")
+    }
+
+    private func installUserScripts() {
+        let ucc = webView.configuration.userContentController
+        ucc.removeAllUserScripts()
+        ucc.addUserScript(WKUserScript(source: Injected.bootstrap(theme: theme, volume: volume),
+                                       injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        ucc.addUserScript(WKUserScript(source: Injected.frameScript(theme: theme),
+                                       injectionTime: .atDocumentStart, forMainFrameOnly: false))
+    }
+
+    private func run(_ js: String) {
+        webView.evaluateJavaScript("window.CP && \(js)", completionHandler: nil)
+    }
+
+    func triggerHoverPlay() {
+        run("CP.clickHoverPlay()")
+    }
+
+    /// Shows a native toast card at the bottom of the left sidebar, auto-dismissing after `duration`s.
+    func showToast(_ text: String, artworkURL: URL? = nil, duration: TimeInterval = 4) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let t = Toast(text: trimmed, artworkURL: artworkURL)
+        toast = t
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            if self?.toast?.id == t.id { self?.toast = nil }
+        }
+    }
+}
+
+// MARK: - State from JS
+
+extension WebPlayer: WKScriptMessageHandler {
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let d = message.body as? [String: Any] else { return }
+        if let hp = d["hoverPlay"] {
+            hoverLeaveWork?.cancel()
+            hoverLeaveWork = nil
+            if let dict = hp as? [String: Any],
+               let x = (dict["x"] as? NSNumber)?.doubleValue,
+               let y = (dict["y"] as? NSNumber)?.doubleValue,
+               let size = (dict["size"] as? NSNumber)?.doubleValue {
+                let z = webView.pageZoom
+                let playing = dict["playing"] as? Bool ?? false
+                let next = HoverPlay(x: x * z, y: y * z, size: size * z, isPlaying: playing)
+                if hoverPlay != next { hoverPlay = next }
+            } else if let s = hp as? String, s == "leave" {
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, !self.isHoveringPlayButton else { return }
+                    self.hoverPlay = nil
+                }
+                hoverLeaveWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+            } else if hoverPlay != nil {
+                hoverPlay = nil
+            }
+            return
+        }
+        if let readyPath = d["trackPageReady"] as? String {
+            handleTrackPageReady(readyPath)
+            return
+        }
+        if let menu = d["menu"] as? [String: Any] {
+            presentMenu(menu, frame: message.frameInfo)
+            return
+        }
+        if let share = d["share"] as? [String: Any] {
+            presentShare(share)
+            return
+        }
+        if let text = d["toast"] as? String, !text.isEmpty {
+            let art = (d["toastArt"] as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
+            showToast(text, artworkURL: art)
+            return
+        }
+        for (key, file) in [("debugToast", "debug-toast.html")] {
+            if let html = d[key] as? String {
+                #if DEBUG
+                try? html.write(to: Self.debugDir.appendingPathComponent(file), atomically: true, encoding: .utf8)
+                #endif
+                return
+            }
+        }
+        var s = TrackState()
+        s.hasTrack = d["hasTrack"] as? Bool ?? false
+        s.title = d["title"] as? String ?? ""
+        s.artist = d["artist"] as? String ?? ""
+        s.trackPath = d["trackPath"] as? String ?? ""
+        s.artistPath = d["artistPath"] as? String ?? ""
+        s.artworkURL = (d["artwork"] as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        s.isPlaying = d["playing"] as? Bool ?? false
+        s.position = (d["position"] as? NSNumber)?.doubleValue ?? 0
+        s.duration = (d["duration"] as? NSNumber)?.doubleValue ?? 0
+        s.isLiked = d["liked"] as? Bool ?? false
+        s.shuffle = d["shuffle"] as? Bool ?? false
+        s.repeatMode = RepeatMode(rawValue: d["repeat"] as? String ?? "") ?? .none
+        s.queueVisible = d["queueVisible"] as? Bool ?? false
+        let prevTrack = lastTrackPath
+        if !s.trackPath.isEmpty { lastTrackPath = s.trackPath }
+        if s != state { state = s }
+        if let p = d["profilePath"] as? String, !p.isEmpty, p != profilePath { profilePath = p }
+
+        // If the user is currently viewing the Now Playing track page and playback moves to
+        // another track, follow it with a directional next/prev swipe animation.
+        let oldNorm = Self.normPath(prevTrack)
+        let newNorm = Self.normPath(s.trackPath)
+        let onNowPlaying = Self.normPath(currentPath) == oldNorm
+            || (!swipeTargetPath.isEmpty && swipeTargetPath == oldNorm)
+            || (pageSwipe != nil && swipeTargetPath.isEmpty)
+        if !oldNorm.isEmpty, !newNorm.isEmpty, oldNorm != newNorm, onNowPlaying {
+            let dir: SwipeDirection
+            if let pending = pendingSwipeDirection, Date().timeIntervalSince(pending.at) < 4 {
+                dir = pending.dir
+                pendingSwipeDirection = nil
+            } else {
+                dir = .next
+            }
+            followNowPlaying(to: s.trackPath, direction: dir)
+        }
+    }
+
+    private static func normPath(_ path: String) -> String {
+        var p = path.split(separator: "?").first.map(String.init) ?? path
+        if p.hasPrefix("/n/") { p.removeFirst(2) }
+        while p.count > 1 && p.hasSuffix("/") { p.removeLast() }
+        return p
+    }
+
+    /// Starts the outgoing swipe immediately on Next/Prev (before SoundCloud even switches tracks),
+    /// giving instant visual feedback while buying time for the new track page to load.
+    private func startImmediateSwipe(direction: SwipeDirection) {
+        swipeGeneration += 1
+        let gen = swipeGeneration
+        swipeTargetPath = ""
+        swipeFallbackWork?.cancel()
+        hoverPlay = nil
+
+        webView.takeSnapshot(with: nil) { [weak self] image, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.swipeGeneration == gen, let image else { return }
+                self.pageSwipe = PageSwipeTransition(id: gen, direction: direction, snapshot: image,
+                                                     outgoingExited: false, incomingReady: false)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+                    guard let self, self.swipeGeneration == gen, var cur = self.pageSwipe, cur.id == gen else { return }
+                    withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.56)) {
+                        cur.outgoingExited = true
+                        self.pageSwipe = cur
+                    }
+                }
+                // Safety net: if the track didn't actually change (e.g. end of queue), reveal again.
+                let fallback = DispatchWorkItem { [weak self] in
+                    self?.revealIncoming(generation: gen)
+                }
+                self.swipeFallbackWork = fallback
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: fallback)
+            }
+        }
+    }
+
+    private func followNowPlaying(to path: String, direction: SwipeDirection) {
+        let target = Self.normPath(path)
+        // If an immediate swipe is already in flight from next()/previous(), reuse it and navigate now.
+        if let existing = pageSwipe, swipeTargetPath.isEmpty, existing.id == swipeGeneration {
+            let gen = existing.id
+            swipeTargetPath = target
+            swipeFallbackWork?.cancel()
+            open(path)
+            let fallback = DispatchWorkItem { [weak self] in
+                self?.revealIncoming(generation: gen)
+            }
+            swipeFallbackWork = fallback
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: fallback)
+            return
+        }
+
+        // Auto-advance (track ended) or track switch without a pre-started swipe.
+        swipeGeneration += 1
+        let gen = swipeGeneration
+        swipeTargetPath = target
+        swipeFallbackWork?.cancel()
+        hoverPlay = nil
+
+        webView.takeSnapshot(with: nil) { [weak self] image, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.swipeGeneration == gen else { return }
+                if let image {
+                    self.pageSwipe = PageSwipeTransition(id: gen, direction: direction, snapshot: image,
+                                                         outgoingExited: false, incomingReady: false)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+                        guard let self, self.swipeGeneration == gen, var cur = self.pageSwipe, cur.id == gen else { return }
+                        withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.56)) {
+                            cur.outgoingExited = true
+                            self.pageSwipe = cur
+                        }
+                    }
+                }
+                self.open(path)
+                let fallback = DispatchWorkItem { [weak self] in
+                    self?.revealIncoming(generation: gen)
+                }
+                self.swipeFallbackWork = fallback
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: fallback)
+            }
+        }
+    }
+
+    private func handleTrackPageReady(_ path: String) {
+        guard !swipeTargetPath.isEmpty, Self.normPath(path) == swipeTargetPath else { return }
+        revealIncoming(generation: swipeGeneration)
+    }
+
+    private func revealIncoming(generation gen: Int) {
+        guard swipeGeneration == gen, var cur = pageSwipe, cur.id == gen, !cur.incomingReady else { return }
+        swipeFallbackWork?.cancel()
+        swipeFallbackWork = nil
+        swipeTargetPath = ""
+
+        withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.42)) {
+            cur.incomingReady = true
+            cur.outgoingExited = true
+            pageSwipe = cur
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.48) { [weak self] in
+            guard let self, self.swipeGeneration == gen else { return }
+            self.pageSwipe = nil
+        }
+    }
+}
+
+// MARK: - Navigation & popups
+
+extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard webView === self.webView else { return }
+        reloadCustomCSS()
+        run("CP.setVolume(\(volume))")
+        #if DEBUG
+        scheduleDebugCapture()
+        #endif
+    }
+
+    /// target=_blank / window.open: SoundCloud links load in place, login providers get a
+    /// real popup window (they need to talk back to the opener), everything else → browser.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        let url = navigationAction.request.url
+        let host = url?.host?.lowercased() ?? ""
+
+        if !host.isEmpty && !Self.isAuthHost(host) {
+            if let url, host == "soundcloud.com" || host.hasSuffix(".soundcloud.com") {
+                open(url.path + (url.query.map { "?\($0)" } ?? ""))
+            } else if let url {
+                NSWorkspace.shared.open(url)
+            }
+            return nil
+        }
+
+        let popup = WKWebView(frame: NSRect(x: 0, y: 0, width: 520, height: 680), configuration: configuration)
+        popup.uiDelegate = self
+        let win = NSWindow(contentRect: popup.frame, styleMask: [.titled, .closable, .resizable],
+                           backing: .buffered, defer: false)
+        win.isReleasedWhenClosed = false
+        win.title = "Sign in"
+        win.contentView = popup
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        popups.append(win)
+        return popup
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        guard let i = popups.firstIndex(where: { $0.contentView === webView }) else { return }
+        popups[i].close()
+        popups.remove(at: i)
+    }
+
+    private static func isAuthHost(_ host: String) -> Bool {
+        let auth = ["accounts.google.com", "appleid.apple.com", "facebook.com",
+                    "secure.soundcloud.com", "api-auth.soundcloud.com"]
+        return auth.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+}
+
+// MARK: - Debug tooling (debug builds only)
+
+#if DEBUG
+extension WebPlayer {
+    static let debugDir = customCSSURL.deletingLastPathComponent()
+
+    /// After a page load, saves debug-dom.json (DOM, player state, requests, checks) and
+    /// debug-window.png (the whole window, native UI + web content).
+    /// Launch arguments: -cpStartPath /you/likes   -cpDebugEval "<js run 4s after first load>"
+    ///                   -cpDebugScroll YES (scroll to the bottom first, for lazy-loaded content)
+    fileprivate func scheduleDebugCapture() {
+        let first = debugFirstLoad
+        debugFirstLoad = false
+        let defaults = UserDefaults.standard
+        if first, let js = defaults.string(forKey: "cpDebugEval") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.webView.evaluateJavaScript("window.__cpMarker = 1; window.__cpEval = (() => { try { return String(eval(\(Injected.js(js)))); } catch (e) { return 'ERR ' + e; } })()", completionHandler: nil)
+            }
+        }
+        if first, defaults.bool(forKey: "cpDebugScroll") {
+            for t in [4.0, 5.5, 7.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in
+                    self?.webView.evaluateJavaScript("window.scrollTo(0, document.body.scrollHeight)", completionHandler: nil)
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (first ? 9.5 : 8)) { [weak self] in
+            self?.dumpDOM()
+            self?.snapshotWindow()
+            if first, defaults.bool(forKey: "cpDebugScroll") {
+                self?.webView.evaluateJavaScript("window.scrollTo(0, 0)", completionHandler: nil)
+            }
+            // -cpQuitAfterCapture YES: a throwaway test instance exits by itself once captured.
+            if first, defaults.bool(forKey: "cpQuitAfterCapture") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NSApp.terminate(nil) }
+            }
+        }
+    }
+
+    /// In-app (single-page) navigation doesn't fire didFinish, so also capture a few seconds
+    /// after the URL changes; a newer navigation supersedes a pending capture.
+    fileprivate func scheduleNavigationDump() {
+        debugNavGeneration += 1
+        let generation = debugNavGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, generation == self.debugNavGeneration else { return }
+            self.dumpDOM()
+            self.snapshotWindow()
+        }
+    }
+
+    func dumpDOM() {
+        let probe = UserDefaults.standard.string(forKey: "cpDebugEval").map {
+            "(() => { try { return String(eval(\(Injected.js($0)))); } catch (e) { return 'ERR ' + e; } })()"
+        } ?? "null"
+        let js = """
+        JSON.stringify({url: location.href, state: window.CP ? CP.state() : null,
+          marker: window.__cpMarker || null, evalResult: window.__cpEval || null, probe: \(probe),
+          errors: (window.CP && CP.debugErrors) || [],
+          bodyClass: document.body.className,
+          visible: [...document.querySelectorAll('.l-sidebar-right .sidebarModule, .l-footer, [id^="div-gpt-ad"], .header')]
+            .map(e => [e.className.slice(0, 80), getComputedStyle(e).display]),
+          sections: [...document.querySelectorAll('li.mixedModularHome__item')]
+            .map(li => [((li.querySelector('h2') || {}).textContent || '').trim(), getComputedStyle(li).display]),
+          resources: performance.getEntriesByType('resource')
+            .map(e => [e.name, e.initiatorType, e.transferSize, e.encodedBodySize]),
+          iframes: [...document.querySelectorAll('iframe')]
+            .map(f => [f.src, f.className, getComputedStyle(f).display]),
+          html: document.documentElement.outerHTML})
+        """
+        webView.evaluateJavaScript(js) { result, _ in
+            guard let s = result as? String else { return }
+            try? FileManager.default.createDirectory(at: Self.debugDir, withIntermediateDirectories: true)
+            try? s.write(to: Self.debugDir.appendingPathComponent("debug-dom.json"), atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Writes the window's accessibility tree (roles + labels), which shows native UI that the
+    /// bitmap capture can't render (e.g. the translucent sidebar).
+    func dumpAccessibility() {
+        guard let window = webView.window, let root = window.contentView?.superview else { return }
+        var lines: [String] = [
+            "window frame=\(window.frame) contentLayoutRect=\(window.contentLayoutRect) styleMask=\(window.styleMask.rawValue) fullScreen=\(window.styleMask.contains(.fullScreen))",
+            "toolbar=\(window.toolbar.map { "visible=\($0.isVisible) items=\($0.items.map { $0.itemIdentifier.rawValue })" } ?? "nil") toolbarStyle=\(window.toolbarStyle.rawValue) titleVisibility=\(window.titleVisibility.rawValue)",
+            "closeButton hidden=\(window.standardWindowButton(.closeButton)?.isHidden as Any) superviewHidden=\(window.standardWindowButton(.closeButton)?.superview?.isHidden as Any)",
+        ]
+        func walk(_ el: Any, _ depth: Int) {
+            guard depth < 40, let e = el as? NSAccessibilityElementProtocol & NSObject else { return }
+            let role = (e.value(forKey: "accessibilityRole") as? NSAccessibility.Role)?.rawValue ?? "?"
+            let label = (e.value(forKey: "accessibilityLabel") as? String) ?? ""
+            let title = (e.value(forKey: "accessibilityTitle") as? String) ?? ""
+            let value = (e.value(forKey: "accessibilityValue")).map { "\($0)" } ?? ""
+            let text = [label, title, value].filter { !$0.isEmpty }.joined(separator: " | ")
+            if role != "AXWebArea" {
+                if !text.isEmpty || role.contains("Row") || role.contains("Toolbar") { lines.append(String(repeating: "  ", count: depth) + "\(role): \(text)") }
+                for child in (e.value(forKey: "accessibilityChildren") as? [Any]) ?? [] { walk(child, depth + 1) }
+            }
+        }
+        walk(root, 0)
+        try? lines.joined(separator: "\n").write(to: Self.debugDir.appendingPathComponent("debug-ax.txt"), atomically: true, encoding: .utf8)
+    }
+
+    /// Renders the window (toolbar, sidebar, player bar) and composites the web content into it.
+    func snapshotWindow() {
+        dumpAccessibility()
+        guard let window = webView.window, window.isVisible,
+              let frameView = window.contentView?.superview,
+              let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else { return }
+        frameView.cacheDisplay(in: frameView.bounds, to: rep)
+        let webRect = webView.convert(webView.bounds, to: frameView)
+        let size = frameView.bounds.size
+        webView.takeSnapshot(with: nil) { image, _ in
+            let out = NSImage(size: size)
+            out.lockFocus()
+            // Web content first, then the window on top, so overlays above the page (the
+            // floating player) stay visible. The web view itself caches as transparent.
+            image?.draw(in: webRect)
+            rep.draw(in: NSRect(origin: .zero, size: size), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            out.unlockFocus()
+            guard let tiff = out.tiffRepresentation,
+                  let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
+            try? png.write(to: Self.debugDir.appendingPathComponent("debug-window.png"))
+        }
+    }
+}
+#endif
+
+/// Avoids a retain cycle between WKUserContentController and WebPlayer.
+final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var target: WKScriptMessageHandler?
+    init(_ target: WKScriptMessageHandler) { self.target = target }
+    func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
+        target?.userContentController(c, didReceive: m)
+    }
+}
