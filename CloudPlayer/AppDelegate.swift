@@ -1,20 +1,48 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, NSMenuItemValidation {
     let player = WebPlayer()
     private var mainWindow: NSWindow!
     private var miniPanel: NSPanel!
     private var statusItem: NSStatusItem!
+    private var authSub: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMainMenu()
         buildMainWindow()
         buildMiniPanel()
         buildStatusItem()
+        authSub = player.$auth.removeDuplicates().sink { [weak self] in self?.authChanged($0) }
         player.load()
         showMain()
+    }
+
+    /// Signed out, the window is just the sign-in form (SignInView); signed in, the library.
+    private func authChanged(_ auth: AuthState) {
+        mainWindow.titlebarSeparatorStyle = auth == .signedIn ? .automatic : .none
+        if auth == .signedOut && miniPanel.isVisible { exitMini() }
+        guard auth == .signedIn else { return }
+        // The sign-in screen allows a smaller window than the library: grow it back once
+        // SwiftUI has applied the library's minimum size.
+        DispatchQueue.main.async { [weak self] in
+            guard let w = self?.mainWindow else { return }
+            let content = w.contentRect(forFrameRect: w.frame).size
+            let minimum = w.contentMinSize
+            if content.width < minimum.width || content.height < minimum.height {
+                w.setContentSize(NSSize(width: max(content.width, minimum.width), height: max(content.height, minimum.height)))
+            }
+        }
+    }
+
+    /// Until there is a session, only app-level commands make sense.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard player.auth != .signedIn, menuItem.target === self else { return true }
+        let allowed: Set<Selector> = [#selector(showMain(_:)), #selector(reloadPage(_:)),
+                                      #selector(editCustomCSS(_:)), #selector(reloadCustomCSS(_:))]
+        return menuItem.action.map(allowed.contains) ?? true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

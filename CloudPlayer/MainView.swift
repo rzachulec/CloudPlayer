@@ -71,6 +71,19 @@ struct MainView: View {
     @State private var columns: NavigationSplitViewVisibility = .all
 
     var body: some View {
+        switch player.auth {
+        case .signedIn:
+            library
+        case .signedOut:
+            SignInView(player: player)
+        case .unknown:   // checking the cookie store: a moment, so just an empty window
+            Color(nsColor: .textBackgroundColor)
+                .ignoresSafeArea()
+                .frame(minWidth: SignInView.minWidth, minHeight: SignInView.minHeight)
+        }
+    }
+
+    private var library: some View {
         NavigationSplitView(columnVisibility: $columns) {
             List(selection: $selection) {
                 Section {
@@ -192,6 +205,57 @@ struct MainView: View {
             let item = SidebarItem.matching(path)
             if item != selection { selection = item }
         }
+    }
+}
+
+/// Signed out: an otherwise empty window with SoundCloud's own sign-in form (restyled, see
+/// Theme.authCSS) in the middle. No sidebar, toolbar or player until there is a session.
+struct SignInView: View {
+    @ObservedObject var player: WebPlayer
+
+    static let minWidth: CGFloat = 520
+    static let minHeight: CGFloat = 640
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 12)
+            VStack(spacing: 8) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 72, height: 72)
+                    .padding(.bottom, 4)
+                Text("Welcome to CloudPlayer")
+                    .font(.system(size: 22, weight: .bold))
+                Text("Sign in with your SoundCloud account to start listening.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.bottom, 22)
+
+            // The shared web view (it must never be recreated), showing only the sign-in form.
+            ZStack {
+                WebViewHost(webView: player.webView)
+                    .opacity(player.signInReady ? 1 : 0)
+                if !player.signInReady {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .frame(width: 400)
+            .frame(minHeight: 360, maxHeight: 540)
+            .animation(.easeOut(duration: 0.25), value: player.signInReady)
+
+            Spacer(minLength: 12)
+            Text("Unofficial. Not affiliated with or endorsed by SoundCloud.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 14)
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor).ignoresSafeArea())
+        .frame(minWidth: Self.minWidth, minHeight: Self.minHeight)
     }
 }
 

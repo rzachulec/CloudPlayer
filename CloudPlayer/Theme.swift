@@ -9,8 +9,9 @@ enum Theme {
     }
 
     /// Resolves the system colours for the app's current appearance.
-    static func current() -> Snapshot {
-        let appearance = NSApp.effectiveAppearance
+    static func current() -> Snapshot { snapshot(for: NSApp.effectiveAppearance) }
+
+    static func snapshot(for appearance: NSAppearance) -> Snapshot {
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         var tokens = ""
         appearance.performAsCurrentDrawingAppearance {
@@ -50,6 +51,110 @@ enum Theme {
     static func frameCSS(_ s: Snapshot) -> String {
         ":root{\(s.tokens)color-scheme:\(s.isDark ? "dark" : "light");}\n" + webiCSS + "\n" + Icons.css
     }
+
+    /// CSS for SoundCloud's sign-in iframe (secure.soundcloud.com): the login options in the
+    /// app's own colours and type. Carries both appearances (the frame's prefers-color-scheme
+    /// follows the app's), so a light/dark switch mid-sign-in restyles it too.
+    static func authCSS() -> String {
+        let light = snapshot(for: NSAppearance(named: .aqua)!)
+        let dark = snapshot(for: NSAppearance(named: .darkAqua)!)
+        return """
+        :root, html body, html body.dark { \(light.tokens) color-scheme: light; }
+        @media (prefers-color-scheme: dark) { :root, html body, html body.dark { \(dark.tokens) color-scheme: dark; } }
+        """ + "\n" + authRulesCSS
+    }
+
+    /// SoundCloud's auth UI is drawn from its design tokens: remap them to system colours,
+    /// then reshape the pieces (pill buttons → macOS-style rounded rects, system font).
+    static let authRulesCSS = """
+    :root, html body, html body.dark, .web-library-surface {
+      --primary-rgb: var(--cp-label-rgb);
+      --primary-color: var(--cp-label);
+      --secondary-color: var(--cp-secondary);
+      --font-primary-color: var(--cp-label);
+      --font-secondary-color: var(--cp-secondary);
+      --font-special-color: var(--cp-accent);
+      --link-standard-color: var(--cp-accent);
+      --background-dark-color: var(--cp-bg);
+      --background-light-color: var(--cp-bg);
+      --background-surface-color: var(--cp-bg);
+      --button-primary-background-color: var(--cp-accent);
+      --button-primary-font-color: #fff;
+      --input-default-background-color: rgba(var(--cp-label-rgb), .05);
+      --input-default-border-color: rgba(var(--cp-label-rgb), .14);
+      --input-focused-border-color: var(--cp-accent);
+      --font-sans-serif-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --wl-font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    }
+    html, body, #app, main, .web-library-surface { background: var(--cp-bg) !important; }
+    /* In an iframe SoundCloud draws its own bordered card; the app's window is the card. */
+    body.auth-ui-in-iframe #app { border: 0 !important; border-radius: 0 !important; padding: 0 !important; }
+    html body, html body * { font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif !important; }
+    html body { -webkit-font-smoothing: antialiased; color: var(--cp-label); }
+    main.vertically-centered { padding: 8px 4px 24px !important; min-height: 0 !important; justify-content: flex-start !important; }
+    .sign-in-up-form, .web-library-surface > div { max-width: 360px; margin: 0 auto; }
+
+    /* Step titles ("Create an account or sign in", "Enter your password", …) */
+    .entry-screen-title, .web-library-surface .entry-screen-title, .wl-title {
+      font-size: 17px !important; font-weight: 600 !important; line-height: 22px !important;
+      letter-spacing: 0 !important; text-align: center !important; padding: 0 !important;
+      margin: 0 0 20px !important; color: var(--cp-label) !important;
+    }
+
+    /* Buttons: Continue with Facebook / Google / Apple, Continue, Back, … */
+    .web-library-surface .wl-button {
+      border-radius: 9px !important; min-height: 38px !important; padding: 0 14px !important;
+      font-size: 13px !important; font-weight: 500 !important; letter-spacing: 0 !important;
+      transition: background-color .12s ease, border-color .12s ease, opacity .12s ease;
+    }
+    .web-library-surface .wl-button--with-icon { padding-top: 0 !important; }
+    .web-library-surface .wl-button__text { padding-top: 0 !important; line-height: 16px !important; }
+    .web-library-surface .wl-button__start-icon { width: 18px !important; height: 18px !important; }
+    .web-library-surface .wl-button__start-icon svg { width: 18px !important; height: 18px !important; }
+    .web-library-surface .wl-button--secondary {
+      background: rgba(var(--cp-label-rgb), .05) !important;
+      border: 1px solid rgba(var(--cp-label-rgb), .12) !important; color: var(--cp-label) !important;
+    }
+    .web-library-surface .wl-button--secondary:hover:not(:disabled) { background: rgba(var(--cp-label-rgb), .10) !important; }
+    .web-library-surface .wl-button--primary { background: var(--cp-accent) !important; border-color: transparent !important; color: #fff !important; }
+    .web-library-surface .wl-button--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--cp-accent), #fff 10%) !important; }
+    .web-library-surface .wl-button:disabled { opacity: .45 !important; }
+    .web-library-surface .wl-button--primary:disabled {
+      opacity: 1 !important; background: rgba(var(--cp-label-rgb), .08) !important; color: var(--cp-secondary) !important;
+    }
+    .web-library-surface .wl-button:focus-visible { outline: 3px solid rgba(var(--cp-accent-rgb), .45) !important; outline-offset: 1px; }
+    .web-library-surface .provider-buttons-ui-evo > div + div { margin-top: 8px !important; }
+
+    /* "OR" divider */
+    .or-divider { margin: 18px 0 !important; font-size: 11px !important; color: var(--cp-secondary) !important; gap: 10px; }
+    .or-divider::before, .or-divider::after { border-top-color: rgba(var(--cp-label-rgb), .12) !important; }
+
+    /* Text fields (floating-label inputs) */
+    label:has(> .ui-evo-input), label:has(select) {
+      height: 44px !important; border-radius: 9px !important;
+      background: rgba(var(--cp-label-rgb), .05) !important;
+      border: 1px solid rgba(var(--cp-label-rgb), .14) !important;
+      transition: border-color .12s ease, box-shadow .12s ease;
+    }
+    label:has(> .ui-evo-input:focus), label:has(select:focus) {
+      border-color: var(--cp-accent) !important;
+      box-shadow: 0 0 0 3px rgba(var(--cp-accent-rgb), .25) !important;
+    }
+    .ui-evo-input, select { color: var(--cp-label) !important; font-size: 13px !important; caret-color: var(--cp-accent) !important; }
+    .ui-evo-input + span, label:has(> .ui-evo-input) > span { color: var(--cp-secondary) !important; font-size: 12px !important; }
+    .ui-evo-input:-webkit-autofill {
+      -webkit-box-shadow: 0 0 0 1000px var(--cp-bg) inset !important;
+      -webkit-text-fill-color: var(--cp-label) !important;
+    }
+    .form-buttons { margin-top: 14px !important; }
+
+    /* Fine print and links */
+    .disclaimer-message, .wl-helper-text, .wl-body-text { font-size: 11px !important; line-height: 15px !important; color: var(--cp-secondary) !important; text-align: center; }
+    .wl-body-text { font-size: 13px !important; line-height: 18px !important; }
+    a, .wl-helper-link, .need-help-link { color: var(--cp-accent) !important; font-size: 12px !important; font-weight: 500 !important; }
+    .need-help-wrapper-ui-evo { text-align: center; margin-top: 4px; }
+    input[type="checkbox"] { accent-color: var(--cp-accent); }
+    """
 
     static let webiCSS = """
     html body, html body * { font-family: -apple-system, BlinkMacSystemFont, system-ui !important; }

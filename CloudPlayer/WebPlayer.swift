@@ -4,6 +4,9 @@ import WebKit
 
 enum RepeatMode: String { case none, one, all }
 
+/// Whether SoundCloud has a signed-in session in the app's cookie store.
+enum AuthState { case unknown, signedOut, signedIn }
+
 enum SwipeDirection: Equatable { case next, previous }
 
 /// Directional page-swipe overlay used when following the Now Playing track page.
@@ -74,6 +77,16 @@ final class WebPlayer: NSObject, ObservableObject {
     @Published var toast: Toast?
     @Published private(set) var hoverPlay: HoverPlay?
     @Published private(set) var pageSwipe: PageSwipeTransition?
+    @Published private(set) var auth = AuthState.unknown
+    /// Signed out: SoundCloud's sign-in form has drawn (until then the window shows a spinner).
+    @Published private(set) var signInReady = false
+    private var authCheck: DispatchWorkItem?
+    /// Signed in, but since then pages have shown no user, and how many times the page has
+    /// reloaded meanwhile (see dropDeadSession).
+    private var noUserSince: Date?
+    private var noUserReloads = 0
+    /// Just signed in: the old signed-out page may still report until the new one commits.
+    private var awaitingFreshPage = false
     private var lastTrackPath = ""
     private var pendingSwipeDirection: (dir: SwipeDirection, at: Date)?
     private var swipeGeneration = 0
@@ -117,6 +130,7 @@ final class WebPlayer: NSObject, ObservableObject {
 
     let webView: WKWebView
     private var popups: [NSWindow] = []
+    private var signInBusyWork: DispatchWorkItem?
     private var theme: Theme.Snapshot
     private var observations: [NSKeyValueObservation] = []
     #if DEBUG
@@ -134,6 +148,15 @@ final class WebPlayer: NSObject, ObservableObject {
         theme = Theme.current()
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()   // persistent cookies → stay logged in
+        #if DEBUG
+        // -cpEphemeral YES: throwaway cookies/storage (test the signed-out flow without logging out).
+        if UserDefaults.standard.bool(forKey: "cpEphemeral") { config.websiteDataStore = .nonPersistent() }
+        // -cpAuthClick facebook|google|apple: the sign-in form clicks that button by itself, so
+        // its popup must be allowed without a real click.
+        if UserDefaults.standard.string(forKey: "cpAuthClick") != nil {
+            config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        }
+        #endif
         config.applicationNameForUserAgent = "Version/18.0 Safari/605.1.15"
         webView = PageWebView(frame: .zero, configuration: config)
         super.init()
@@ -184,6 +207,8 @@ final class WebPlayer: NSObject, ObservableObject {
             block = !UserDefaults.standard.bool(forKey: "cpNoBlocklist")   // debug: -cpNoBlocklist YES
             #endif
             if block { await Blocklist.install(on: webView.configuration.userContentController) }
+            webView.configuration.websiteDataStore.httpCookieStore.add(self)
+            await refreshAuth()
             var url = Self.home
             #if DEBUG
             if let path = UserDefaults.standard.string(forKey: "cpStartPath"),
@@ -221,7 +246,93 @@ final class WebPlayer: NSObject, ObservableObject {
             guard let self else { return }
             self.state = TrackState()
             self.profilePath = ""
+            self.setAuth(.signedOut)
             self.webView.load(URLRequest(url: URL(string: "https://soundcloud.com/")!))
+        }
+    }
+
+    // MARK: Auth
+
+    /// Signed in = SoundCloud's session cookies are present (the refresh token alone is
+    /// enough: the page renews the access token itself).
+    private func refreshAuth() async {
+        let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+        let now = Date()
+        let session = cookies.filter {
+            ($0.name == "oauth_token" || $0.name == "oauth_refresh_token") && !$0.value.isEmpty
+                && ($0.domain == "soundcloud.com" || $0.domain.hasSuffix(".soundcloud.com"))
+                && ($0.expiresDate.map { $0 > now } ?? true)
+        }
+        setAuth(session.isEmpty ? .signedOut : .signedIn)
+    }
+
+    /// The page's view of the session, from each state report: a real profile link means a
+    /// user; SoundCloud's "Sign in" header or a profile link to "/undefined" means none.
+    private func notePageUser(profilePath: String, noUser: Bool) {
+        guard auth == .signedIn, !awaitingFreshPage else { return }
+        if !profilePath.isEmpty && !profilePath.hasSuffix("/undefined") {
+            noUserSince = nil
+        } else if noUser {
+            guard let since = noUserSince else {
+                noUserSince = Date()
+                noUserReloads = 0
+                return
+            }
+            if Date().timeIntervalSince(since) > 12 && noUserReloads >= 3 { dropDeadSession() }
+        }
+    }
+
+    /// A stored session SoundCloud no longer accepts (expired / revoked): its pages show no
+    /// user and keep reloading themselves every couple of seconds. Both must hold (so an API
+    /// hiccup never signs anyone out). Forget just the dead tokens, which shows the sign-in
+    /// screen and lets SoundCloud load as signed out.
+    private func dropDeadSession() {
+        noUserSince = nil
+        #if DEBUG
+        debugAuthLog("dropping dead session")
+        #endif
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        Task {
+            for c in await store.allCookies()
+            where (c.name == "oauth_token" || c.name == "oauth_refresh_token")
+                && (c.domain == "soundcloud.com" || c.domain.hasSuffix(".soundcloud.com")) {
+                await store.deleteCookie(c)
+            }
+            await refreshAuth()
+            webView.load(URLRequest(url: URL(string: "https://soundcloud.com/")!))
+        }
+    }
+
+    fileprivate func scheduleAuthCheck() {
+        authCheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in Task { await self?.refreshAuth() } }
+        authCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    private func setAuth(_ new: AuthState) {
+        guard new != auth else { return }
+        let old = auth
+        auth = new
+        #if DEBUG
+        debugAuthLog("\(old) → \(new)")
+        #endif
+        switch new {
+        case .signedOut:
+            signInReady = false
+            noUserSince = nil
+            profilePath = ""
+            run("CP.setSignIn(true)")
+        case .signedIn:
+            run("CP.setSignIn(false)")
+            // Just signed in: start fresh on Home (SoundCloud would otherwise stay on its
+            // signed-out landing page until it reloads).
+            if old == .signedOut {
+                awaitingFreshPage = true
+                webView.load(URLRequest(url: Self.home))
+            }
+        case .unknown:
+            break
         }
     }
 
@@ -316,6 +427,8 @@ final class WebPlayer: NSObject, ObservableObject {
                                        injectionTime: .atDocumentStart, forMainFrameOnly: true))
         ucc.addUserScript(WKUserScript(source: Injected.frameScript(theme: theme),
                                        injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        ucc.addUserScript(WKUserScript(source: Injected.authFrameScript(),
+                                       injectionTime: .atDocumentStart, forMainFrameOnly: false))
     }
 
     private func run(_ js: String) {
@@ -367,6 +480,16 @@ extension WebPlayer: WKScriptMessageHandler {
             }
             return
         }
+        #if DEBUG
+        if let text = d["debugAuthLog"] as? String {
+            debugAuthLog("page: \(text)")
+            return
+        }
+        #endif
+        if d["authFrameReady"] as? Bool == true {
+            if auth == .signedOut && !signInReady { signInReady = true }
+            return
+        }
         if let readyPath = d["trackPageReady"] as? String {
             handleTrackPageReady(readyPath)
             return
@@ -384,7 +507,7 @@ extension WebPlayer: WKScriptMessageHandler {
             showToast(text, artworkURL: art)
             return
         }
-        for (key, file) in [("debugToast", "debug-toast.html")] {
+        for (key, file) in [("debugToast", "debug-toast.html"), ("debugAuth", "debug-auth.html")] {
             if let html = d[key] as? String {
                 #if DEBUG
                 try? html.write(to: Self.debugDir.appendingPathComponent(file), atomically: true, encoding: .utf8)
@@ -410,7 +533,8 @@ extension WebPlayer: WKScriptMessageHandler {
         let prevTrack = lastTrackPath
         if !s.trackPath.isEmpty { lastTrackPath = s.trackPath }
         if s != state { state = s }
-        if let p = d["profilePath"] as? String, !p.isEmpty, p != profilePath { profilePath = p }
+        if let p = d["profilePath"] as? String, !p.isEmpty, !p.hasSuffix("/undefined"), p != profilePath { profilePath = p }
+        notePageUser(profilePath: d["profilePath"] as? String ?? "", noUser: d["noUser"] as? Bool ?? false)
 
         // If the user is currently viewing the Now Playing track page and playback moves to
         // another track, follow it with a directional next/prev swipe animation.
@@ -539,13 +663,36 @@ extension WebPlayer: WKScriptMessageHandler {
     }
 }
 
+// MARK: - Session cookies
+
+extension WebPlayer: WKHTTPCookieStoreObserver {
+    nonisolated func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+        Task { @MainActor in self.scheduleAuthCheck() }
+    }
+}
+
 // MARK: - Navigation & popups
 
 extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard webView === self.webView else {
+            #if DEBUG
+            debugAuthLog("popup commit \(webView.url.map { "\($0.host ?? "")\($0.path)" } ?? "")")
+            #endif
+            return
+        }
+        awaitingFreshPage = false
+        if noUserSince != nil { noUserReloads += 1 }
+        #if DEBUG
+        debugAuthLog("commit \(webView.url?.absoluteString ?? "")")
+        #endif
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard webView === self.webView else { return }
         reloadCustomCSS()
         run("CP.setVolume(\(volume))")
+        if auth == .signedOut { run("CP.setSignIn(true)") }
         #if DEBUG
         scheduleDebugCapture()
         #endif
@@ -559,7 +706,9 @@ extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
         let host = url?.host?.lowercased() ?? ""
 
         if !host.isEmpty && !Self.isAuthHost(host) {
-            if let url, host == "soundcloud.com" || host.hasSuffix(".soundcloud.com") {
+            // Signed out, the page is only the sign-in form: its links (Terms, Privacy, Need
+            // help?) would replace it, so they go to the browser.
+            if let url, auth == .signedIn, host == "soundcloud.com" || host.hasSuffix(".soundcloud.com") {
                 open(url.path + (url.query.map { "?\($0)" } ?? ""))
             } else if let url {
                 NSWorkspace.shared.open(url)
@@ -567,23 +716,65 @@ extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
             return nil
         }
 
-        let popup = WKWebView(frame: NSRect(x: 0, y: 0, width: 520, height: 680), configuration: configuration)
+        // Google / Apple / Facebook sign-in: a real window (the provider talks back to its
+        // opener), centred over the app window.
+        let size = NSSize(width: max(windowFeatures.width?.doubleValue ?? 0, 480),
+                          height: max(windowFeatures.height?.doubleValue ?? 0, 640))
+        let popup = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration)
         popup.uiDelegate = self
+        #if DEBUG
+        popup.navigationDelegate = self   // logs its pages (didCommit)
+        debugAuthLog("popup opened for \(url?.absoluteString ?? "nil")")
+        #endif
         let win = NSWindow(contentRect: popup.frame, styleMask: [.titled, .closable, .resizable],
                            backing: .buffered, defer: false)
         win.isReleasedWhenClosed = false
-        win.title = "Sign in"
+        win.title = Self.providerTitle(host)
         win.contentView = popup
-        win.center()
+        if let parent = self.webView.window, parent.isVisible {
+            let p = parent.frame
+            win.setFrameOrigin(NSPoint(x: p.midX - win.frame.width / 2, y: p.midY - win.frame.height / 2))
+        } else {
+            win.center()
+        }
         win.makeKeyAndOrderFront(nil)
         popups.append(win)
+        // Closed with its close button (not by the page): forget it too.
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: win, queue: .main) { [weak self, weak win] _ in
+            MainActor.assumeIsolated {
+                guard let self, let win, let i = self.popups.firstIndex(of: win) else { return }
+                self.popups.remove(at: i)
+                self.popupsChanged()
+            }
+        }
+        popupsChanged()
         return popup
+    }
+
+    /// A provider sign-in is in flight while its popup is open, and for a moment after it
+    /// closes (SoundCloud is still exchanging the result for a session): the page must not
+    /// restart its sign-in meanwhile (CP.setSignIn).
+    private func popupsChanged() {
+        signInBusyWork?.cancel()
+        if !popups.isEmpty {
+            run("CP.signInBusy = true")
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in self?.run("CP.signInBusy = false") }
+        signInBusyWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+    }
+
+    private static func providerTitle(_ host: String) -> String {
+        if host.contains("google") { return "Sign in with Google" }
+        if host.contains("apple") { return "Sign in with Apple" }
+        if host.contains("facebook") { return "Sign in with Facebook" }
+        return "Sign in to SoundCloud"
     }
 
     func webViewDidClose(_ webView: WKWebView) {
         guard let i = popups.firstIndex(where: { $0.contentView === webView }) else { return }
-        popups[i].close()
-        popups.remove(at: i)
+        popups[i].close()   // willClose observer removes it
     }
 
     private static func isAuthHost(_ host: String) -> Bool {
@@ -597,7 +788,17 @@ extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
 
 #if DEBUG
 extension WebPlayer {
-    static let debugDir = customCSSURL.deletingLastPathComponent()
+    /// Sign-in state changes and page loads, appended to debug-auth-log.txt.
+    func debugAuthLog(_ text: String) {
+        let line = "\(Date()) \(text)\n"
+        let logURL = Self.debugDir.appendingPathComponent("debug-auth-log.txt")
+        if let h = try? FileHandle(forWritingTo: logURL) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+        else { try? line.write(to: logURL, atomically: true, encoding: .utf8) }
+    }
+
+    /// -cpDebugDir <path>: write captures there instead (keeps parallel test instances apart).
+    static let debugDir = UserDefaults.standard.string(forKey: "cpDebugDir").map { URL(fileURLWithPath: $0) }
+        ?? customCSSURL.deletingLastPathComponent()
 
     /// After a page load, saves debug-dom.json (DOM, player state, requests, checks) and
     /// debug-window.png (the whole window, native UI + web content).
@@ -712,13 +913,17 @@ extension WebPlayer {
         frameView.cacheDisplay(in: frameView.bounds, to: rep)
         let webRect = webView.convert(webView.bounds, to: frameView)
         let size = frameView.bounds.size
+        // Signed out, the page sits on an opaque background (SignInView) with nothing above it.
+        let webOnTop = auth != .signedIn
+        let webAlpha = webOnTop && !signInReady ? 0.0 : 1.0
         webView.takeSnapshot(with: nil) { image, _ in
             let out = NSImage(size: size)
             out.lockFocus()
             // Web content first, then the window on top, so overlays above the page (the
             // floating player) stay visible. The web view itself caches as transparent.
-            image?.draw(in: webRect)
+            if !webOnTop { image?.draw(in: webRect) }
             rep.draw(in: NSRect(origin: .zero, size: size), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            if webOnTop { image?.draw(in: webRect, from: .zero, operation: .sourceOver, fraction: webAlpha) }
             out.unlockFocus()
             guard let tiff = out.tiffRepresentation,
                   let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }

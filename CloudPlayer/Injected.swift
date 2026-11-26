@@ -134,6 +134,26 @@ enum Injected {
     html.cp-hide-queue body { transition: none !important; padding-right: 0 !important; }
     """
 
+    /// Signed out (html.cp-signin, see CP.setSignIn): the page shows nothing but SoundCloud's
+    /// sign-in iframe, filling the web view, which the app frames as a card (SignInView).
+    static let signInCSS = """
+    html.cp-signin, html.cp-signin body { background: var(--cp-bg) !important; overflow: hidden !important; }
+    html.cp-signin body > :not(.webAuthContainerWrapper) { display: none !important; }
+    html.cp-signin .webAuthContainerWrapper {
+      display: block !important; visibility: visible !important; opacity: 1 !important;
+      position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important;
+      margin: 0 !important; padding: 0 !important; transform: none !important;
+      background: var(--cp-bg) !important; z-index: 2147483647 !important;
+    }
+    html.cp-signin .webAuthContainerWrapper > :not(iframe) { display: none !important; }
+    html.cp-signin .webAuthContainerWrapper > iframe {
+      display: block !important; position: absolute !important; inset: 0 !important;
+      width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important;
+      margin: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+      transform: none !important; background: var(--cp-bg) !important;
+    }
+    """
+
     /// Home page sections to hide, matched against the start of each section's heading
     /// (case-insensitive). Headings like "Mixed for <username>" are personalised, which is
     /// why this is matched by text in JS rather than in CSS.
@@ -355,6 +375,52 @@ enum Injected {
         """
     }
 
+    /// Runs in SoundCloud's sign-in iframe (secure.soundcloud.com/web-auth): restyles the
+    /// login options to match the app (Theme.authCSS).
+    static func authFrameScript() -> String {
+        #if DEBUG
+        let debug = true
+        let autoClick = UserDefaults.standard.string(forKey: "cpAuthClick") ?? ""   // -cpAuthClick facebook
+        #else
+        let debug = false
+        let autoClick = ""
+        #endif
+        return """
+        (() => {
+        if (location.hostname !== 'secure.soundcloud.com' || window === window.top || window.CPAuth) return;
+        const AUTO_CLICK = \(js(autoClick));
+        window.CPAuth = true;
+        const st = document.createElement('style'); st.id = 'cp-auth';
+        st.textContent = \(js(Theme.authCSS()));
+        // Keep ours last so it wins over stylesheets SoundCloud adds later.
+        const mount = () => { const root = document.head || document.documentElement; if (root.lastElementChild !== st) root.appendChild(st); };
+        mount(); document.addEventListener('DOMContentLoaded', mount);
+        // SoundCloud preloads this frame hidden (#…is_visible=false) and flips the hash when the
+        // sign-in modal opens: tell the app once the form is drawn and the frame is shown.
+        let posted = false, t = 0;
+        const post = (m) => { try { window.webkit.messageHandlers.cp.postMessage(m); } catch (e) {} };
+        const check = () => {
+          if (posted || !/[#&]is_visible=true\\b/.test(location.hash)) return;
+          if (!document.querySelector('#app main button, #app main input')) return;
+          posted = true;
+          // (Not requestAnimationFrame: WebKit throttles it in cross-origin frames.)
+          setTimeout(() => post({ authFrameReady: true }), 60);
+          if (AUTO_CLICK) setTimeout(() => {
+            const b = document.querySelector('[data-testid="sign_in_up_provider_' + AUTO_CLICK + '"]');
+            post({ debugAuthLog: 'auto-click ' + AUTO_CLICK + (b ? '' : ' (no button)') });
+            if (b) b.click();
+          }, 1500);
+        };
+        window.addEventListener('hashchange', check);
+        new MutationObserver(() => {
+          mount();
+          check();
+          if (\(debug)) { clearTimeout(t); t = setTimeout(() => post({ debugAuth: document.documentElement.outerHTML }), 800); }
+        }).observe(document, { subtree: true, childList: true });
+        })();
+        """
+    }
+
     static func bootstrap(theme: Theme.Snapshot, volume: Double?) -> String {
         #if DEBUG
         let debug = true
@@ -364,7 +430,7 @@ enum Injected {
         return """
         (() => {
         const DEBUG = \(debug);
-        const BASE_CSS = \(js(debloatCSS));
+        const BASE_CSS = \(js(debloatCSS + "\n" + signInCSS));
         const HIDE_SECTIONS = \(js(hiddenHomeSections.map { $0.lowercased() }));
         const INITIAL_THEME = { dark: \(theme.isDark), css: \(js(Theme.css(theme))) };
         const INITIAL_VOLUME = \(volume.map { String($0) } ?? "null");
@@ -2231,6 +2297,14 @@ enum Injected {
       }, 30);
     };
 
+    let signInTimer = 0;
+    // The page shows no signed-in user: SoundCloud's "Sign in" header, or (with a session token
+    // it no longer accepts) a user menu for "/undefined". The app decides how long is too long.
+    const noUser = () => {
+      const user = hrefOf('.header__userNavUsernameButton');
+      return (!!$('button.loginButton') && !user) || /\/undefined$/.test(user);
+    };
+
     const CP = window.CP = {
       media: null,
       debugErrors,
@@ -2261,6 +2335,31 @@ enum Injected {
         }
       },
       setVolume(v) { CP.volume = v; if (CP.media) CP.media.volume = v; },
+
+      // Signed out: show only SoundCloud's sign-in form (signInCSS) and re-open its modal if
+      // it gets closed (Escape), which here would leave an empty window. Re-opening restarts
+      // SoundCloud's sign-in (new PKCE / nonce), so never while one may be in flight: not
+      // while a provider popup is open (CP.signInBusy, set by the app), and only after the
+      // modal has stayed closed for a while (SoundCloud closes it itself when sign-in succeeds).
+      signInBusy: false,
+      setSignIn(on) {
+        document.documentElement.classList.toggle('cp-signin', on);
+        clearInterval(signInTimer); signInTimer = 0;
+        if (!on) return;
+        let opened = false, closedTicks = 0;
+        const keepOpen = () => {
+          const w = $('.webAuthContainerWrapper');
+          if ((w && !w.classList.contains('hidden')) || CP.signInBusy) { closedTicks = 0; return; }
+          if (opened && ++closedTicks < 6) return;   // ~3.6 s
+          const b = $('button.loginButton');
+          if (!b) return;
+          if (DEBUG) window.webkit.messageHandlers.cp.postMessage({ debugAuthLog: 'keepOpen: ' + (w ? w.className : 'no wrapper') + ' → open' });
+          opened = true; closedTicks = 0;
+          b.click();
+        };
+        keepOpen();
+        signInTimer = setInterval(keepOpen, 600);
+      },
 
       // In-app navigation without a page reload (a reload would stop playback):
       // SoundCloud's router handles clicks on same-site links.
@@ -2302,6 +2401,7 @@ enum Injected {
           trackPath: hrefOf('.playbackSoundBadge__titleLink'),
           artistPath: hrefOf('.playbackSoundBadge__lightLink'),
           profilePath: hrefOf('.header__userNavUsernameButton'),
+          noUser: noUser(),
           artwork: art ? bigArt(art) : '',
           playing: playBtn ? playBtn.classList.contains('playing') : !!(m && !m.paused),
           position: round(useMedia ? m.currentTime : domPos),
