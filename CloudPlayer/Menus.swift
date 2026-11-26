@@ -314,6 +314,7 @@ enum Menus {
       // Groups, like Apple Music: play · library · go to · copy/share.
       const play = [], lib = [], go = [], acts = {};
       let obj = null, prof = null, profName = '';
+      let ownLike = false;   // Like added from the item's heart button
       if (root) {
         const el = root.el;
         const pb = el.querySelector(WEBI ? 'button[aria-label="Play"], button[aria-label="Pause"]' : '.sc-button-play');
@@ -327,6 +328,7 @@ enum Menus {
           if (like) {
             const liked = WEBI ? label(like) === 'Unlike' : like.classList.contains('sc-button-selected');
             lib.push(act(liked ? 'Unlike' : 'Like', liked ? 'heart.slash' : 'heart', () => like.click()));
+            ownLike = true;
           }
         }
         ({ obj, prof, profName } = linksIn(el));
@@ -342,6 +344,8 @@ enum Menus {
           const src = sourceFor(root.more);
           for (const it of (await read(src)) || []) {
             if (it.kind) seen.add(it.kind);
+            // Some "More" menus (e.g. Next up rows) list Like too: keep only the one added above.
+            if (ownLike && /^(un)?liked?$/i.test(it.t || '')) continue;
             if ((obj || prof) && (it.kind === 'share' || it.kind === 'copylink')) continue;   // native ones below
             it.fn = () => choose(src, it, null);
             (it.kind === 'queue' ? play : it.kind === 'startstation' ? go : lib).push(it);

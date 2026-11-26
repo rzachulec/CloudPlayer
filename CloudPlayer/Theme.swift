@@ -1174,8 +1174,6 @@ enum Theme {
       font-size: 12px !important; line-height: 16px !important; color: var(--cp-secondary) !important;
       margin: 1px 0 0 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
     }
-    /* Names filled in from the URL slug (the real one is only invisible characters). */
-    .cp-untitled { font-style: italic !important; }
     :is(.l-search:not(.cp-view-tiles), .l-search.cp-view-tiles:has(.sound)) .userItem__details > * { display: inline !important; }
     :is(.l-search:not(.cp-view-tiles), .l-search.cp-view-tiles:has(.sound)) .userItem__details > :not(:empty) ~ :not(:empty)::before {
       content: " · "; color: var(--cp-secondary);
@@ -1395,7 +1393,7 @@ enum Theme {
     .l-listen-wrapper .paging-eof,
     .systemPlaylistTrackList .paging-eof,
     .paging-eof { display: none !important; }
-    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .listenDetails, .l-hero-banner) .l-main,
+    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .systemPlaylistTrackList__item, .listenDetails, .l-hero-banner) .l-main,
     .l-listen--main > .l-main,
     .l-listen-wrapper,
     .l-listen-wrapper .l-about-rows,
@@ -1407,7 +1405,7 @@ enum Theme {
       width: auto !important; max-width: none !important; min-width: 0 !important;
       float: none !important; margin: 0 !important; border: 0 !important;
     }
-    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .listenDetails, .l-hero-banner) .l-main,
+    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .systemPlaylistTrackList__item, .listenDetails, .l-hero-banner) .l-main,
     .l-listen--main > .l-main {
       padding: 14px 16px 24px !important;
     }
@@ -1417,6 +1415,12 @@ enum Theme {
     .truncatedUserDescription__wrapper::after,
     .truncatedUserDescription.m-overflow .truncatedUserDescription__wrapper::after {
       background: linear-gradient(to bottom, rgba(var(--cp-bg-rgb), 0), var(--cp-bg)) !important;
+    }
+    /* System playlists: every container between the rows and .l-main (tagged by Injected's
+       widenSystemPlaylist) takes the full width, as on album/playlist pages. */
+    .cp-fullwidth {
+      width: auto !important; max-width: none !important; min-width: 0 !important;
+      float: none !important; margin-right: 0 !important; flex: 1 1 auto !important;
     }
     :is(.trackList__list, .systemPlaylistTrackList__list) { margin: 0 !important; padding: 0 !important; border: 0 !important; }
     :is(.trackList__item, .systemPlaylistTrackList__item) { border: 0 !important; margin: 0 !important; padding: 0 !important; }
@@ -1471,8 +1475,12 @@ enum Theme {
     }
     .l-user-hero .cp-profile-meta-links {
       display: flex !important; flex-wrap: wrap !important; align-items: center !important;
-      gap: 6px !important; margin-top: 10px !important; position: relative !important; z-index: 3 !important;
+      gap: 6px !important; margin-top: 10px !important; position: relative !important; z-index: 20 !important;
     }
+    /* Own profile: SoundCloud's banner/avatar upload controls stack above the info block and
+       swallowed clicks on the pills. Lift the info block (z-index applies only if SoundCloud
+       positions it; the pills' own z-index covers the static case). */
+    .l-user-hero .profileHeaderInfo, .l-user-hero .profileHeaderInfo__content { z-index: 20 !important; }
     .l-user-hero .cp-profile-meta-link {
       display: inline-flex !important; align-items: center !important; height: 24px !important;
       padding: 0 10px !important; border-radius: 999px !important;
@@ -1493,7 +1501,7 @@ enum Theme {
     /* ── Profile: Apple Music style (no underline tabs; actions in hero; sections + See All) ─ */
     .l-vertical-bar:has(.userInfoBar), .userInfoBar { display: none !important; }
     .l-user-hero .profileHeader .cp-profile-actions {
-      position: absolute !important; right: 24px !important; bottom: 20px !important; z-index: 4 !important;
+      position: absolute !important; right: 24px !important; bottom: 20px !important; z-index: 21 !important;
       display: flex !important; align-items: center !important; gap: 8px !important;
       margin: 0 !important; padding: 0 !important;
     }
