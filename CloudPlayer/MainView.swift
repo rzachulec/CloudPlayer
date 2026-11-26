@@ -171,6 +171,7 @@ struct MainView: View {
                     Menu {
                         Button("Profile") { player.open(player.profilePath) }
                             .disabled(player.profilePath.isEmpty)
+                        Button("Messages") { player.open("/messages") }
                         Button("Settings") { player.open("/settings") }
                         Divider()
                         Button("Sign Out…", action: onSignOut)

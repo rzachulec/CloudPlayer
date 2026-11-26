@@ -24,7 +24,7 @@ enum Blocklist {
         #"^https?://api-v2\.soundcloud\.com/activities\?.*limit=1&"#,
 
         // Tracking / marketing (not visible content)
-        #"^https?://cdn\.cookielaw\.org/"#,                 // OneTrust cookie-consent SDK
+        // (Not cdn.cookielaw.org: /settings requires OneTrust SDK to mount; its UI is hidden in debloatCSS.)
         #"^https?://dwt\.soundcloud\.com/"#,                // SoundCloud analytics tags
         #"^https?://prodregistryv2\.org/v1/rgstr"#,         // Statsig event logging (feature flags still load)
         #"^https?://invite\.soundcloud\.com/"#,             // in-app marketing zones
