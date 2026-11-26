@@ -290,6 +290,8 @@ final class WebPlayer: NSObject, ObservableObject {
     private func installUserScripts() {
         let ucc = webView.configuration.userContentController
         ucc.removeAllUserScripts()
+        ucc.addUserScript(WKUserScript(source: Injected.mediaSessionShim,
+                                       injectionTime: .atDocumentStart, forMainFrameOnly: false))
         ucc.addUserScript(WKUserScript(source: Injected.bootstrap(theme: theme, volume: volume),
                                        injectionTime: .atDocumentStart, forMainFrameOnly: true))
         ucc.addUserScript(WKUserScript(source: Injected.frameScript(theme: theme),

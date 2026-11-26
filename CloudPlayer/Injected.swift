@@ -138,6 +138,25 @@ enum Injected {
         "Curated by SoundCloud",
     ]
 
+    /// macOS shows a web page's Media Session as its own Now Playing entry, which duplicated the
+    /// app's native one (NowPlaying.swift). Keep SoundCloud's metadata readable inside the page
+    /// (CP.state falls back to it) but never hand it, its playback state or its action handlers
+    /// to WebKit. Runs in every frame before SoundCloud's scripts.
+    static let mediaSessionShim = """
+    (() => {
+      const ms = navigator.mediaSession;
+      if (!ms || window.__cpMediaShim) return;
+      window.__cpMediaShim = true;
+      let meta = null;
+      try {
+        Object.defineProperty(ms, 'metadata', { configurable: true, get: () => meta, set: (v) => { meta = v; } });
+        Object.defineProperty(ms, 'playbackState', { configurable: true, get: () => 'none', set: () => {} });
+        ms.setActionHandler = () => {};
+        ms.setPositionState = () => {};
+      } catch (e) {}
+    })();
+    """
+
     /// Runs in SoundCloud's same-origin "/n/…" iframes (track pages): styles the track header.
     static func frameScript(theme: Theme.Snapshot) -> String {
         """
