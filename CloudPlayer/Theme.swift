@@ -1475,12 +1475,12 @@ enum Theme {
     }
     .l-user-hero .cp-profile-meta-links {
       display: flex !important; flex-wrap: wrap !important; align-items: center !important;
-      gap: 6px !important; margin-top: 10px !important; position: relative !important; z-index: 20 !important;
+      gap: 6px !important; margin-top: 10px !important; position: relative !important; z-index: 3 !important;
     }
-    /* Own profile: SoundCloud's banner/avatar upload controls stack above the info block and
-       swallowed clicks on the pills. Lift the info block (z-index applies only if SoundCloud
-       positions it; the pills' own z-index covers the static case). */
-    .l-user-hero .profileHeaderInfo, .l-user-hero .profileHeaderInfo__content { z-index: 20 !important; }
+    /* Own profile: SoundCloud's edit layer (.profileHeader__edit) is a transparent box over the
+       whole hero, above the pills. Let the pointer through it; its own controls stay clickable. */
+    .l-user-hero .profileHeader__edit { pointer-events: none !important; }
+    .l-user-hero .profileHeader__edit :is(button, a, input, label, .sc-button) { pointer-events: auto !important; }
     .l-user-hero .cp-profile-meta-link {
       display: inline-flex !important; align-items: center !important; height: 24px !important;
       padding: 0 10px !important; border-radius: 999px !important;
@@ -1501,7 +1501,7 @@ enum Theme {
     /* ── Profile: Apple Music style (no underline tabs; actions in hero; sections + See All) ─ */
     .l-vertical-bar:has(.userInfoBar), .userInfoBar { display: none !important; }
     .l-user-hero .profileHeader .cp-profile-actions {
-      position: absolute !important; right: 24px !important; bottom: 20px !important; z-index: 21 !important;
+      position: absolute !important; right: 24px !important; bottom: 20px !important; z-index: 4 !important;
       display: flex !important; align-items: center !important; gap: 8px !important;
       margin: 0 !important; padding: 0 !important;
     }

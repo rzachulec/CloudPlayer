@@ -1068,22 +1068,6 @@ enum Injected {
       });
       return a;
     };
-    // Profile hero pills (Followers, Likes, Comments…): on the user's own profile SoundCloud's
-    // upload controls can sit on top of them. A click inside a pill's box goes to that pill,
-    // whatever element is on top.
-    window.addEventListener('click', (ev) => {
-      if (!ev.isTrusted || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
-      const t = ev.target instanceof Element ? ev.target : null;
-      if (!t || !t.closest('.l-user-hero') || t.closest('.cp-profile-meta-link')) return;
-      for (const a of document.querySelectorAll('.l-user-hero .cp-profile-meta-link')) {
-        const r = a.getBoundingClientRect();
-        if (ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom) {
-          ev.preventDefault(); ev.stopImmediatePropagation();
-          CP.open(a.getAttribute('href'));
-          return;
-        }
-      }
-    }, true);
     const makeSectionHeader = (title, href) => {
       const head = document.createElement('div');
       head.className = 'cp-section__header';
