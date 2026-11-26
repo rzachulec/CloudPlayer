@@ -286,22 +286,39 @@ enum Injected {
         // Elements already inspected (computed-style checks are costly and this runs per mutation frame).
         const tidyChecked = new WeakSet();
         const FADE_SKIP = 'section[aria-label="Track header"], .MuiAvatar-root, .MuiChip-root, button, a, [role="button"], img, [class*="artwork" i], [class*="badge" i], [class*="skeleton" i]';
+        const isFansHeaderOnly = (el) => {
+          const t = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+          return /^fans(\\s*\\*?\\s*only visible to you)?$/i.test(t);
+        };
+        const isFansStop = (el) => !el || el === document.body || el === document.documentElement ||
+          el.id === 'main' || el.id === 'navigation-shell-right-side-container' ||
+          el.matches('main, aside, nav, header, section[aria-label="Track header"]') ||
+          !!el.querySelector('section[aria-label="Track header"]');
+        const hasNonFansH2 = (el) => [...el.querySelectorAll('h2')].some((h) => !/^fans$/i.test((h.textContent || '').trim()));
+        const hideFansSection = () => {
+          const anchors = [
+            ...document.querySelectorAll('[aria-label="More info about fans data"]'),
+            ...[...document.querySelectorAll('h2')].filter((h) => /^fans$/i.test((h.textContent || '').trim()) && !h.closest('section[aria-label="Track header"], nav, header')),
+          ];
+          for (const a of anchors) {
+            if (a.closest('.cp-fans-module')) continue;
+            let hdr = a;
+            while (hdr.parentElement && !isFansStop(hdr.parentElement) && isFansHeaderOnly(hdr.parentElement)) {
+              hdr = hdr.parentElement;
+            }
+            let mod = hdr.parentElement;
+            if (!mod || isFansStop(mod) || hasNonFansH2(mod)) continue;
+            while (mod.parentElement && mod.parentElement.children.length === 1 && !isFansStop(mod.parentElement) && !hasNonFansH2(mod.parentElement)) {
+              mod = mod.parentElement;
+            }
+            mod.classList.add('cp-fans-module');
+            mod.style.setProperty('display', 'none', 'important');
+          }
+        };
         const tidyTrackFrame = () => {
+          hideFansSection();
           const aside = document.querySelector('aside');
           if (aside) {
-            const isFansText = (t) => t === 'Fans' || t === 'Climb the leaderboard' || t.startsWith('Fans who have played this track');
-            // True when el holds another rail module's heading (Likes, Reposts, …), so it isn't the Fans module alone.
-            const hasOtherModule = (el) => [...el.querySelectorAll('h2, h3')].some((x) => !isFansText((x.textContent || '').trim()));
-            for (const h of aside.querySelectorAll('h2, h3, [class*="MuiTypography-"]')) {
-              const txt = (h.textContent || '').trim();
-              if (isFansText(txt)) {
-                let mod = h;
-                while (mod.parentElement && mod.parentElement !== aside && !hasOtherModule(mod.parentElement)) mod = mod.parentElement;
-                if (mod !== h && !hasOtherModule(mod) && !/Related Tracks|In Playlists|In Albums/i.test(mod.textContent || '')) {
-                  mod.style.setProperty('display', 'none', 'important');
-                }
-              }
-            }
             for (const b of aside.querySelectorAll('button, a[role="button"]')) {
               const lbl = (b.getAttribute('aria-label') || b.textContent || '').trim();
               if (/^(message|send a message)$/i.test(lbl)) {

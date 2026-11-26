@@ -26,9 +26,7 @@ enum Blocklist {
         // Tracking / marketing (not visible content)
         // (Not dwt.soundcloud.com: it is DataDome bot protection, and without its cookie
         // SoundCloud's server refuses sign-in, e.g. "Continue with Facebook".)
-        #"^https?://cdn\.cookielaw\.org/"#,                 // OneTrust cookie-consent SDK
         // (Not cdn.cookielaw.org: /settings requires OneTrust SDK to mount; its UI is hidden in debloatCSS.)
-        #"^https?://dwt\.soundcloud\.com/"#,                // SoundCloud analytics tags
         #"^https?://prodregistryv2\.org/v1/rgstr"#,         // Statsig event logging (feature flags still load)
         #"^https?://invite\.soundcloud\.com/"#,             // in-app marketing zones
         #"^https?://[^/]*doubleclick\.net/"#,
