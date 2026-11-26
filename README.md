@@ -8,6 +8,18 @@ A native macOS player for SoundCloud, built with SwiftUI + WebKit. Requires macO
 
 > Unofficial. Not affiliated with or endorsed by SoundCloud.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rzachulec/CloudPlayer/main/install.sh | bash
+```
+
+This downloads the right build for your Mac, quits CloudPlayer if it's running, puts it in
+`/Applications`, and opens it. Run it again any time to update; you stay signed in, because your
+SoundCloud session lives in `~/Library`, not inside the app. Read [`install.sh`](install.sh) first
+if you like: it's short. Options go before `bash`, e.g. `… | CLOUDPLAYER_DIR=~/Applications bash`
+installs elsewhere, and `CLOUDPLAYER_NO_LAUNCH=1` skips opening the app.
+
 ## Download
 
 Every push to `main` builds the app for both Mac architectures, signs it with a self-signed
@@ -25,25 +37,7 @@ notarized. When you download one in a browser, macOS marks it as quarantined and
 refuses to open it ("CloudPlayer can't be opened because Apple cannot check it for malicious
 software"). Removing the quarantine flag lets it run.
 
-**One-liner to install or update** (downloads the right build for your Mac, quits CloudPlayer if
-it's running, replaces it in `/Applications`, and launches the new version):
-
-```sh
-ARCH=$([ "$(uname -m)" = arm64 ] && echo apple-silicon || echo intel) && \
-curl -fL -o /tmp/CloudPlayer.zip \
-  "https://github.com/rzachulec/CloudPlayer/releases/download/latest/CloudPlayer-macos-$ARCH.zip" && \
-{ pgrep -xq CloudPlayer && osascript -e 'quit app "CloudPlayer"' && while pgrep -xq CloudPlayer; do sleep 0.5; done; true; } && \
-rm -rf /Applications/CloudPlayer.app && \
-ditto -x -k /tmp/CloudPlayer.zip /Applications && \
-rm -f /tmp/CloudPlayer.zip && \
-xattr -dr com.apple.quarantine /Applications/CloudPlayer.app && \
-open /Applications/CloudPlayer.app
-```
-
-Run the same command again whenever you want the newest build. You stay signed in across
-updates: your SoundCloud session is stored in `~/Library`, not inside the app.
-
-**Step by step**, if you already downloaded the zip in your browser:
+The [install command](#install) does this for you. **Step by step**, if you already downloaded the zip in your browser:
 
 ```sh
 cd ~/Downloads
