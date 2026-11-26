@@ -54,14 +54,6 @@ private struct NativeMainShell: View {
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
-            .safeAreaInset(edge: .bottom) {
-                if let toast = app.toast {
-                    NativeToastView(toast: toast) { app.toast = nil }
-                        .padding(10)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(.spring(duration: 0.32), value: app.toast)
         } detail: {
             ZStack(alignment: .bottom) {
                 HStack(spacing: 0) {
@@ -70,7 +62,7 @@ private struct NativeMainShell: View {
 
                     if app.audio.queueVisible {
                         Divider()
-                        UpNextSidebar(app: app)
+                        QueueDrawerView(app: app)
                             .frame(width: 320)
                             .transition(.move(edge: .trailing))
                     }
@@ -150,12 +142,14 @@ private struct NativeMainShell: View {
     @ViewBuilder
     private var routeView: some View {
         switch app.router.current {
+        case .home:
+            HomeView(app: app)
         case .likes:
             LikesView(app: app)
-        case .home:
-            MilestonePlaceholderView(title: "Home", symbol: "house", milestone: "Milestone 4")
         case .history:
-            MilestonePlaceholderView(title: "History", symbol: "clock", milestone: "Milestone 4")
+            HistoryView(app: app)
+        case .playlist(let playlist):
+            CollectionDetailView(playlist: playlist, app: app)
         case .playlists:
             MilestonePlaceholderView(title: "Playlists", symbol: "music.note.list", milestone: "Milestone 5")
         case .albums:
@@ -198,111 +192,5 @@ private struct MilestonePlaceholderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
-    }
-}
-
-private struct UpNextSidebar: View {
-    @Bindable var app: AppController
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Up Next")
-                    .font(.system(size: 14, weight: .semibold))
-                Spacer()
-                if app.audio.queue.upcomingCount > 0 {
-                    Button("Clear") { app.audio.clearUpcoming() }
-                        .buttonStyle(.link)
-                        .font(.system(size: 12))
-                }
-            }
-            .padding(14)
-            Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if !app.audio.queue.userUpNext.isEmpty {
-                        Text("Queued")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 12)
-                        ForEach(app.audio.queue.userUpNext) { t in
-                            queueRow(t)
-                        }
-                    }
-                    if !app.audio.queue.contextQueue.isEmpty {
-                        Text("From \(app.audio.queue.contextTitle ?? "Queue")")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 4)
-                        ForEach(app.audio.queue.contextQueue.prefix(50)) { t in
-                            queueRow(t)
-                        }
-                    }
-                    if app.audio.queue.userUpNext.isEmpty && app.audio.queue.contextQueue.isEmpty {
-                        Text("Nothing queued up.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .padding(16)
-                    }
-                }
-                .padding(.vertical, 10)
-            }
-        }
-        .background(.background)
-    }
-
-    private func queueRow(_ track: SCTrack) -> some View {
-        HStack(spacing: 8) {
-            CachedArtwork(url: track.resolvedArtworkURL(size: .small), size: 32, cornerRadius: 4)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(track.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                Text(track.artistName).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            app.audio.play(track: track, inContext: app.audio.queue.contextQueue, contextTitle: app.audio.queue.contextTitle)
-        }
-    }
-}
-
-private struct NativeToastView: View {
-    let toast: NativeToast
-    let dismiss: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            if let url = toast.artworkURL {
-                CachedArtwork(url: url, size: 34, cornerRadius: 6)
-            } else {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.tint)
-            }
-            Text(toast.text)
-                .font(.system(size: 12))
-                .lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .modifier(NativeToastGlass())
-        .contentShape(Rectangle())
-        .onTapGesture(perform: dismiss)
-    }
-}
-
-private struct NativeToastGlass: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        } else {
-            content
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
-        }
     }
 }

@@ -115,6 +115,72 @@ actor SoundCloudAPI {
         _ = try await sendData(path: "/users/\(userID)/track_likes/\(trackID)", method: "DELETE")
     }
 
+    func fetchMixedSelections(limit: Int = 12) async throws -> [SCMixedSelection] {
+        let page: SCCollectionPage<SCMixedSelection> = try await get(
+            path: "/mixed-selections",
+            query: [
+                URLQueryItem(name: "variant_ids", value: ""),
+                URLQueryItem(name: "limit", value: String(limit)),
+            ]
+        )
+        return page.collection
+    }
+
+    func fetchPlayHistory(limit: Int = 50, nextHref: String? = nil) async throws -> SCCollectionPage<SCHistoryItem> {
+        if let nextHref, !nextHref.isEmpty {
+            return try await get(path: nextHref)
+        }
+        return try await get(
+            path: "/me/play-history/tracks",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func fetchPlaylist(id: Int) async throws -> SCPlaylist {
+        try await get(path: "/playlists/\(id)")
+    }
+
+    func fetchTracks(ids: [Int]) async throws -> [SCTrack] {
+        guard !ids.isEmpty else { return [] }
+        var all: [SCTrack] = []
+        var offset = 0
+        while offset < ids.count {
+            let chunk = Array(ids[offset..<min(offset + 50, ids.count)])
+            let joined = chunk.map(String.init).joined(separator: ",")
+            let batch: [SCTrack] = try await get(
+                path: "/tracks",
+                query: [URLQueryItem(name: "ids", value: joined)]
+            )
+            all.append(contentsOf: batch)
+            offset += 50
+        }
+        let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
+        return ids.compactMap { byID[$0] }
+    }
+
+    /// Resolves all tracks for a playlist/album/system-playlist (hydrating any ID-only stubs).
+    func resolveTracks(for playlist: SCPlaylist) async throws -> [SCTrack] {
+        let source: SCPlaylist
+        if (playlist.tracks ?? []).isEmpty, let id = playlist.id {
+            source = try await fetchPlaylist(id: id)
+        } else {
+            source = playlist
+        }
+        guard let entries = source.tracks, !entries.isEmpty else { return [] }
+        let missing = source.missingTrackIDs
+        let hydratedByID: [Int: SCTrack]
+        if !missing.isEmpty {
+            let fetched = try await fetchTracks(ids: missing)
+            hydratedByID = Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0) })
+        } else {
+            hydratedByID = [:]
+        }
+        return entries.compactMap { $0.fullTrack ?? hydratedByID[$0.id] }
+    }
+
     // MARK: - Core Request Pipeline
 
     func get<T: Decodable>(path: String, query: [URLQueryItem] = []) async throws -> T {

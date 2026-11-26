@@ -1,0 +1,192 @@
+import SwiftUI
+
+/// Native Listening History screen backed by `/me/play-history/tracks`.
+struct HistoryView: View {
+    @Bindable var app: AppController
+
+    @AppStorage("cp.viewMode.history") private var viewModeRaw: String = TrackListDisplayMode.compact.rawValue
+    @State private var tracks: [SCTrack] = []
+    @State private var nextHref: String?
+    @State private var isLoading = false
+    @State private var isLoadingMore = false
+    @State private var errorMessage: String?
+
+    private var viewMode: TrackListDisplayMode {
+        TrackListDisplayMode(rawValue: viewModeRaw) ?? .compact
+    }
+
+    private let tileColumns = [GridItem(.adaptive(minimum: 165, maximum: 220), spacing: 18)]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                header
+                content
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 92)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+        .task(id: app.currentUser?.id) {
+            await loadStaleWhileRevalidate()
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("History")
+                    .font(.system(size: 24, weight: .bold))
+                Text("Recently played tracks")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: 2) {
+                ForEach(TrackListDisplayMode.allCases) { mode in
+                    Button {
+                        withAnimation(.easeOut(duration: 0.16)) { viewModeRaw = mode.rawValue }
+                    } label: {
+                        Image(systemName: mode.symbol)
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 26, height: 22)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(viewMode == mode ? Color.accentColor.opacity(0.18) : Color.clear)
+                            )
+                            .foregroundStyle(viewMode == mode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    }
+                    .buttonStyle(.plain)
+                    .help(mode.label)
+                }
+            }
+            .padding(2)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            if !tracks.isEmpty {
+                Button {
+                    if let first = tracks.first {
+                        app.audio.play(track: first, inContext: tracks, contextTitle: "History")
+                    }
+                } label: {
+                    Label("Play", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isLoading && tracks.isEmpty {
+            if viewMode == .tiles {
+                TileGridSkeleton()
+            } else {
+                LazyVStack(spacing: 4) {
+                    ForEach(0..<14, id: \.self) { _ in
+                        TrackRowSkeleton(waveformMode: viewMode == .waveform)
+                    }
+                }
+            }
+        } else if let errorMessage, tracks.isEmpty {
+            VStack(spacing: 10) {
+                Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
+                Button("Retry") { Task { await refreshFromNetwork() } }.buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity, minHeight: 260)
+        } else if tracks.isEmpty {
+            Text("No listening history yet.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 240)
+        } else {
+            switch viewMode {
+            case .tiles:
+                LazyVGrid(columns: tileColumns, spacing: 20) {
+                    ForEach(tracks) { track in
+                        NativeMediaTile(track: track, app: app) {
+                            app.audio.play(track: track, inContext: tracks, contextTitle: "History")
+                        }
+                        .onAppear { maybeLoadMore(currentTrack: track) }
+                    }
+                }
+            case .compact, .waveform:
+                LazyVStack(spacing: viewMode == .waveform ? 4 : 2) {
+                    ForEach(tracks) { track in
+                        NativeTrackRow(
+                            track: track,
+                            app: app,
+                            mode: viewMode,
+                            onPlay: {
+                                app.audio.play(track: track, inContext: tracks, contextTitle: "History")
+                            },
+                            onArtistTap: { user in
+                                app.router.navigate(to: .user(user))
+                            }
+                        )
+                        .onAppear { maybeLoadMore(currentTrack: track) }
+                    }
+                }
+            }
+
+            if isLoadingMore {
+                HStack {
+                    Spacer()
+                    ProgressView().controlSize(.small)
+                    Spacer()
+                }
+                .padding(.vertical, 14)
+            }
+        }
+    }
+
+    private var cacheKey: String {
+        "history:\(app.currentUser?.id ?? 0):v1"
+    }
+
+    private func loadStaleWhileRevalidate() async {
+        if tracks.isEmpty, let cached = await app.cache.load([SCTrack].self, key: cacheKey), !cached.isEmpty {
+            tracks = cached
+        }
+        await refreshFromNetwork()
+    }
+
+    private func refreshFromNetwork() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            let page = try await app.api.fetchPlayHistory(limit: 50)
+            let fetched = deduplicate(page.collection.compactMap(\.track))
+            tracks = fetched
+            nextHref = page.nextHref
+            await app.cache.save(fetched, key: cacheKey)
+        } catch {
+            if tracks.isEmpty { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func maybeLoadMore(currentTrack: SCTrack) {
+        guard let nextHref, !isLoadingMore,
+              let idx = tracks.firstIndex(where: { $0.id == currentTrack.id }),
+              idx >= tracks.count - 8 else { return }
+
+        Task {
+            isLoadingMore = true
+            defer { isLoadingMore = false }
+            if let page = try? await app.api.fetchPlayHistory(nextHref: nextHref) {
+                let existing = Set(tracks.map(\.id))
+                let unique = deduplicate(page.collection.compactMap(\.track)).filter { !existing.contains($0.id) }
+                tracks.append(contentsOf: unique)
+                self.nextHref = page.nextHref
+            }
+        }
+    }
+
+    private func deduplicate(_ items: [SCTrack]) -> [SCTrack] {
+        var seen = Set<Int>()
+        return items.filter { seen.insert($0.id).inserted }
+    }
+}

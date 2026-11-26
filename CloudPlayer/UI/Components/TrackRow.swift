@@ -232,11 +232,9 @@ struct TrackContextMenu: View {
         Button("Play", systemImage: "play.fill", action: onPlay)
         Button("Play Next", systemImage: "text.insert") {
             app.audio.enqueueNext(track)
-            app.showToast("Playing next: \(track.title)", artworkURL: track.resolvedArtworkURL(size: .small))
         }
         Button("Add to Up Next", systemImage: "text.line.first.and.arrowtriangle.forward") {
             app.audio.enqueueLater(track)
-            app.showToast("Added to Up Next", artworkURL: track.resolvedArtworkURL(size: .small))
         }
         Divider()
         Button(liked ? "Unlike" : "Like", systemImage: liked ? "heart.slash" : "heart") {
@@ -247,7 +245,6 @@ struct TrackContextMenu: View {
             Button("Copy Link", systemImage: "link") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url.absoluteString, forType: .string)
-                app.showToast("Copied link to clipboard")
             }
             Button("Open on SoundCloud", systemImage: "safari") {
                 NSWorkspace.shared.open(url)

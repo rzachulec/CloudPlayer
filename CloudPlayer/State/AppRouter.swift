@@ -55,6 +55,7 @@ enum NativeRoute: Hashable, Sendable {
     case history
     case search(String)
     case track(SCTrack)
+    case playlist(SCPlaylist)
     case user(SCUser)
 
     var sidebarItem: NativeSidebarItem? {
@@ -66,7 +67,7 @@ enum NativeRoute: Hashable, Sendable {
         case .stations: .stations
         case .following: .following
         case .history: .history
-        case .search, .track, .user: nil
+        case .search, .track, .playlist, .user: nil
         }
     }
 }

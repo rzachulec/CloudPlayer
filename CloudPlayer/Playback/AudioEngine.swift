@@ -223,6 +223,10 @@ final class AudioEngine {
         queue.clearUpcoming()
     }
 
+    func setAutoplayEnabled(_ enabled: Bool) {
+        queue.autoplayEnabled = enabled
+    }
+
     func shutdown() {
         loadTask?.cancel()
         relatedTask?.cancel()
