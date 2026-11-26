@@ -1174,6 +1174,8 @@ enum Theme {
       font-size: 12px !important; line-height: 16px !important; color: var(--cp-secondary) !important;
       margin: 1px 0 0 !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
     }
+    /* Names filled in from the URL slug (the real one is only invisible characters). */
+    .cp-untitled { font-style: italic !important; }
     :is(.l-search:not(.cp-view-tiles), .l-search.cp-view-tiles:has(.sound)) .userItem__details > * { display: inline !important; }
     :is(.l-search:not(.cp-view-tiles), .l-search.cp-view-tiles:has(.sound)) .userItem__details > :not(:empty) ~ :not(:empty)::before {
       content: " · "; color: var(--cp-secondary);

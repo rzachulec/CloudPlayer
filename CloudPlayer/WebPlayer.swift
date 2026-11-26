@@ -51,6 +51,7 @@ struct TrackState: Equatable {
     var shuffle = false
     var repeatMode = RepeatMode.none
     var queueVisible = false
+    var albumPath = ""
 }
 
 /// Owns the SoundCloud web view (the audio engine) and exposes its state + controls.
@@ -195,9 +196,12 @@ final class WebPlayer: NSObject, ObservableObject {
     // MARK: Navigation
 
     /// Navigates inside SoundCloud's single-page app (keeps playback going).
-    func open(_ path: String) {
+    /// `replace`: replace the current history entry instead of adding one.
+    func open(_ path: String, replace: Bool = false) {
         guard !path.isEmpty else { return }
-        webView.evaluateJavaScript("window.CP ? CP.open(\(Injected.js(path))) : location.assign(\(Injected.js(path)))", completionHandler: nil)
+        let p = Injected.js(path)
+        let fallback = replace ? "location.replace(\(p))" : "location.assign(\(p))"
+        webView.evaluateJavaScript("window.CP ? CP.open(\(p), \(replace)) : \(fallback)", completionHandler: nil)
     }
 
     func search(_ query: String) {
@@ -402,6 +406,7 @@ extension WebPlayer: WKScriptMessageHandler {
         s.shuffle = d["shuffle"] as? Bool ?? false
         s.repeatMode = RepeatMode(rawValue: d["repeat"] as? String ?? "") ?? .none
         s.queueVisible = d["queueVisible"] as? Bool ?? false
+        s.albumPath = d["albumPath"] as? String ?? ""
         let prevTrack = lastTrackPath
         if !s.trackPath.isEmpty { lastTrackPath = s.trackPath }
         if s != state { state = s }
@@ -471,7 +476,7 @@ extension WebPlayer: WKScriptMessageHandler {
             let gen = existing.id
             swipeTargetPath = target
             swipeFallbackWork?.cancel()
-            open(path)
+            open(path, replace: true)
             let fallback = DispatchWorkItem { [weak self] in
                 self?.revealIncoming(generation: gen)
             }
@@ -501,7 +506,7 @@ extension WebPlayer: WKScriptMessageHandler {
                         }
                     }
                 }
-                self.open(path)
+                self.open(path, replace: true)
                 let fallback = DispatchWorkItem { [weak self] in
                     self?.revealIncoming(generation: gen)
                 }

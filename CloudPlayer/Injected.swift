@@ -399,6 +399,14 @@ enum Injected {
       if (DEBUG) return p.catch((err) => { if (debugErrors.length < 100) debugErrors.push('fetch failed: ' + String(url + ' — ' + err).slice(0, 300)); throw err; });
       return p;
     };
+    // CP.open(path, true): SoundCloud's router pushes a history entry for the navigation; turn
+    // that one push into a replace.
+    let replaceNextPush = false;
+    const origPushState = history.pushState;
+    history.pushState = function (state, title, url) {
+      if (replaceNextPush) { replaceNextPush = false; return history.replaceState(state, title, url); }
+      return origPushState.apply(this, arguments);
+    };
     const origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (method, url) {
       sniffApiUrl(url);
@@ -975,6 +983,37 @@ enum Injected {
       } catch (e) {}
       return '';
     };
+    // The album a track is on (for "Go to Album"): /resolve → /tracks/{id}/albums, preferring an
+    // album by the track's own artist. Cached per track path: { path, title } or null.
+    const albumCache = new Map();
+    const albumInflight = new Map();
+    const albumFor = (trackPath) => {
+      const key = String(trackPath || '').split('?')[0].replace(/^\/n(?=\/)/, '').replace(/\/+$/, '');
+      if (!key || key.split('/').filter(Boolean).length < 2) return Promise.resolve(null);
+      if (albumCache.has(key)) return Promise.resolve(albumCache.get(key));
+      if (albumInflight.has(key)) return albumInflight.get(key);
+      const p = (async () => {
+        let cid = findClientId();
+        for (let i = 0; !cid && i < 10; i++) { await sleep(200); cid = findClientId(); }
+        if (!cid) return null;   // not cached: try again later
+        let result = null;
+        try {
+          const r = await origFetch(`https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent('https://soundcloud.com' + key)}&client_id=${encodeURIComponent(cid)}`);
+          const t = r.ok ? await r.json() : null;
+          if (t && t.kind === 'track' && t.id) {
+            const ar = await origFetch(`https://api-v2.soundcloud.com/tracks/${t.id}/albums?client_id=${encodeURIComponent(cid)}&limit=10`);
+            const j = ar.ok ? await ar.json() : null;
+            const list = (j && Array.isArray(j.collection)) ? j.collection : [];
+            const own = list.find((a) => a && a.user && a.user.id === t.user_id) || list[0];
+            if (own && own.permalink_url) result = { path: new URL(own.permalink_url).pathname, title: own.title || '' };
+          }
+        } catch (e) { result = null; }
+        albumCache.set(key, result);
+        return result;
+      })().finally(() => albumInflight.delete(key));
+      albumInflight.set(key, p);
+      return p;
+    };
     const findProfileUserId = (basePath) => {
       const st = document.querySelector('.sc-button-startstation[href*="artist-stations:"]');
       if (st) {
@@ -1224,20 +1263,31 @@ enum Injected {
         profileInflight.delete(basePath);
       }
     };
+    // The signed-in user's profile path, from SoundCloud's (hidden) header.
+    const isOwnProfile = (basePath) => {
+      const own = (hrefOf('.header__userNavUsernameButton') || '').split('?')[0].replace(/\/+$/, '').toLowerCase();
+      return !!own && own === String(basePath || '').toLowerCase();
+    };
     const syncProfileHeroMeta = (hero, basePath) => {
       const infoContent = hero.querySelector('.profileHeaderInfo__content') || hero.querySelector('.profileHeaderInfo');
       if (!infoContent) return;
       const cached = profileCache.get(basePath);
       const u = cached && cached.user;
 
-      let followersTxt = '', followingTxt = '', likesTxt = '';
+      let followersTxt = '', followingTxt = '', likesTxt = '', tracksTxt = '';
       for (const a of document.querySelectorAll('.infoStats__statLink, .infoStats a[href]')) {
         const h = normHref(a.getAttribute('href'));
         const valEl = a.querySelector('.infoStats__value');
         const val = (valEl ? valEl.textContent : '').trim();
         if (h === basePath + '/followers' && val) followersTxt = `${val} Followers`;
         else if (h === basePath + '/following' && val) followingTxt = `${val} Following`;
+        else if (h === basePath + '/tracks' && val && val !== '0') tracksTxt = `${val} ${val === '1' ? 'Track' : 'Tracks'}`;
       }
+      if (!tracksTxt && u && typeof u.track_count === 'number' && u.track_count > 0) {
+        tracksTxt = `${fmtPlays(u.track_count)} ${u.track_count === 1 ? 'Track' : 'Tracks'}`;
+      }
+      // Own profile: the right sidebar (hidden here) was the way to your comments.
+      const own = isOwnProfile(basePath);
       const likesHdr = document.querySelector('.likesModule a.sidebarHeader .sidebarHeader__actualTitle');
       if (likesHdr) {
         const m = (likesHdr.textContent || '').trim().match(/^([\d.,KMB]+)\s+likes?/i);
@@ -1250,7 +1300,7 @@ enum Injected {
       const fLabel = followersTxt || 'Followers';
       const gLabel = followingTxt || 'Following';
       const lLabel = likesTxt || 'Likes';
-      const sig = `${basePath}|${fLabel}|${gLabel}|${lLabel}`;
+      const sig = `${basePath}|${fLabel}|${gLabel}|${lLabel}|${tracksTxt}|${own}`;
       let row = infoContent.querySelector(':scope > .cp-profile-meta-links');
       if (row && row.dataset.cpSig === sig) return;
       if (row) row.remove();
@@ -1260,6 +1310,8 @@ enum Injected {
       row.appendChild(makeNavLink(basePath + '/followers', 'cp-profile-meta-link', fLabel));
       row.appendChild(makeNavLink(basePath + '/following', 'cp-profile-meta-link', gLabel));
       row.appendChild(makeNavLink(basePath + '/likes', 'cp-profile-meta-link', lLabel));
+      if (tracksTxt) row.appendChild(makeNavLink(basePath + '/tracks', 'cp-profile-meta-link', tracksTxt));
+      if (own) row.appendChild(makeNavLink(basePath + '/comments', 'cp-profile-meta-link', 'Comments'));
       infoContent.appendChild(row);
     };
     const syncProfileAbout = (mainContent, basePath, isOverview) => {
@@ -1394,10 +1446,15 @@ enum Injected {
       } else if (profileBtnsMoved && !profileBtnsMoved.isConnected && profileBtnsBase === basePath) {
         hero.appendChild(profileBtnsMoved);
       }
+      // Insights stays on the signed-in user's own profile (it's theirs to see); hidden elsewhere.
+      const isOwn = isOwnProfile(basePath);
       for (const b of hero.querySelectorAll('.cp-profile-actions button, .cp-profile-actions a')) {
         const lbl = (b.getAttribute('aria-label') || b.getAttribute('title') || b.textContent || '').replace(/\s+/g, ' ').trim();
-        if (/\binsights\b/i.test(lbl) || /^(send a message|message)$/i.test(lbl) || b.classList.contains('sc-button-insights') || (b.getAttribute('href') || '').includes('/insights')) {
+        const insights = /\binsights\b/i.test(lbl) || b.classList.contains('sc-button-insights') || (b.getAttribute('href') || '').includes('/insights');
+        if ((insights && !isOwn) || /^(send a message|message)$/i.test(lbl)) {
           b.style.setProperty('display', 'none', 'important');
+        } else if (insights) {
+          b.style.removeProperty('display');
         }
       }
 
@@ -1845,6 +1902,34 @@ enum Injected {
     // Shuffle enables SoundCloud's shuffle mode, starts track #1 silently behind the scenes
     // to load the Likes queue, and immediately skips Next to land on a random liked track.
     const normHref = (h) => (h || '').split('?')[0].replace(/\/+$/, '');
+
+    // Some uploads are titled (or their uploader named) with only invisible characters, e.g.
+    // U+200E, which leaves blank rows such as "1 ·  ·" in mixes. Show a name from the link's
+    // URL slug instead: the track slug for titles, the profile slug for usernames.
+    const INVISIBLE = /[\s­͏ᅟᅠ឴឵᠎​-‏‪-‮⁠-⁯⠀ㅤ﻿ﾠ]/g;
+    const BLANK_NAME_SEL = '.trackItem__trackTitle, .trackItem__username, .fullHero__titleTextText, ' +
+      '.soundTitle__title, .soundTitle__username, .playableTile__mainHeading a, .playableTile__usernameHeading, ' +
+      '.playbackSoundBadge__titleLink, .playbackSoundBadge__lightLink';
+    const slugName = (slug) => decodeURIComponent(slug || '').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const fillBlankNames = () => {
+      for (const el of document.querySelectorAll(BLANK_NAME_SEL)) {
+        if (el.dataset.cpBlankFixed === el.textContent) continue;   // already filled, unchanged since
+        // Mix heroes read "Related tracks: <seed title>": only the part after the prefix can be blank.
+        const prefix = el.matches('.fullHero__titleTextText') ? ((el.textContent || '').match(/^\s*Related tracks:/i) || [''])[0].trim() : '';
+        if ((el.textContent || '').slice(prefix ? (el.textContent || '').indexOf(':') + 1 : 0).replace(INVISIBLE, '') !== '') continue;
+        const a = el.closest('a[href]') || el.querySelector('a[href]');
+        const segs = normHref(a ? a.getAttribute('href') : '').split('/').filter(Boolean);
+        if (!segs.length) continue;
+        const isUser = el.matches('.trackItem__username, .soundTitle__username, .playableTile__usernameHeading, .playbackSoundBadge__lightLink');
+        const name = slugName(isUser ? segs[0] : segs[segs.length - 1]);
+        if (!name) continue;
+        // Keep any child elements (icons); replace only the text.
+        const target = el.querySelector('span:not(:has(*))') || el;
+        target.textContent = prefix ? `${prefix} ${name}` : name;
+        el.classList.add('cp-untitled');
+        el.dataset.cpBlankFixed = el.textContent;
+      }
+    };
     const isLikesPage = () => location.pathname.replace(/\/+$/, '') === '/you/likes';
     const isShuffling = () => {
       const b = $('button.shuffleControl');
@@ -2007,7 +2092,7 @@ enum Injected {
     // Runs synchronously after each DOM change (before paint), so hidden sections never
     // render and their artwork is never requested.
     new MutationObserver((records) => {
-      hideSections(); leaveFeed(); applyThemeClass(); profileView(); networkView(); settingsView(); syncViewToggles(); unclipSearchOptions(); heroActions(); setupTileGalleries(); syncSearchPlayAll(); syncLikesActions();
+      hideSections(); leaveFeed(); applyThemeClass(); profileView(); networkView(); settingsView(); syncViewToggles(); unclipSearchOptions(); heroActions(); setupTileGalleries(); syncSearchPlayAll(); syncLikesActions(); fillBlankNames();
       for (const r of records) if (r.addedNodes.length) tagToasts(r.addedNodes);
     })
       .observe(document.documentElement, { childList: true, subtree: true });
@@ -2179,8 +2264,11 @@ enum Injected {
 
       // In-app navigation without a page reload (a reload would stop playback):
       // SoundCloud's router handles clicks on same-site links.
-      open(path) {
+      // replace: the navigation replaces the current history entry instead of adding one
+      // (used when the Now Playing page follows playback, so Back returns to where it started).
+      open(path, replace) {
         if (location.pathname + location.search === path) return;
+        if (replace) { replaceNextPush = true; setTimeout(() => { replaceNextPush = false; }, 2000); }
         const a = document.createElement('a');
         a.href = path;
         a.style.display = 'none';
@@ -2222,6 +2310,13 @@ enum Injected {
           shuffle: !!(shuffleBtn && /\b(m-shuffling|sc-button-selected|m-active)\b/.test(shuffleBtn.className)),
           repeat: /\bm-one\b/.test(repeatCls) ? 'one' : /\bm-all\b/.test(repeatCls) ? 'all' : 'none',
           queueVisible: !!$('.playControls.m-queueVisible'),
+          albumPath: (() => {   // for "Go to Album" in the player's menu; looked up once per track
+            const tp = normHref(hrefOf('.playbackSoundBadge__titleLink'));
+            if (!tp) return '';
+            if (!albumCache.has(tp)) { albumFor(tp).then(() => CP.report()); return ''; }
+            const a = albumCache.get(tp);
+            return a ? a.path : '';
+          })(),
           volume: round((CP.volume != null ? CP.volume : (m ? m.volume : 1)) * 100) / 100,
         };
       },
@@ -2265,6 +2360,7 @@ enum Injected {
         }
       },
 
+      albumFor,
       report() {
         if (silentTransition) return;
         try {

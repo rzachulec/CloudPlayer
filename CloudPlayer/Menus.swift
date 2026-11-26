@@ -365,6 +365,17 @@ enum Menus {
         lib.push(act(label(follow) || (on ? 'Unfollow' : 'Follow'), on ? 'person.badge.minus' : 'person.badge.plus', () => follow.click()));
       }
       if (obj && obj !== here()) go.push({ t: 'Go to ' + objectName(obj), s: 'arrow.right.circle', open: obj });
+      // A track on an album: "Go to Album" (looked up via the main page, cached per track; if the
+      // lookup takes longer than a moment the menu opens without it, and has it next time).
+      const trackPath = obj && objectName(obj) === 'Track' ? obj : null;
+      if (trackPath) {
+        let lookup = null;
+        try { lookup = window.top.CP && window.top.CP.albumFor ? window.top.CP.albumFor(trackPath) : null; } catch (e) {}
+        const album = lookup ? await Promise.race([lookup, sleep(450).then(() => null)]) : null;
+        if (album && album.path && album.path !== here()) {
+          go.push({ t: 'Go to Album', s: 'square.stack', open: album.path });
+        }
+      }
       if (prof && prof !== here()) go.push({ t: profName && profName.length <= 40 ? 'Go to ' + profName : 'Go to Profile', s: 'person.crop.circle', open: prof });
       const p = obj || prof;
       const items = [...play, { sep: 1 }, ...lib, { sep: 1 }, ...go, ...(p ? shareItems('https://soundcloud.com' + p) : [])];
@@ -660,6 +671,9 @@ struct NowPlayingMenu: View {
         Divider()
         Button { player.open(s.trackPath); onNavigate() } label: { Label("Go to Track", systemImage: "arrow.right.circle") }
             .disabled(s.trackPath.isEmpty)
+        if !s.albumPath.isEmpty {
+            Button { player.open(s.albumPath); onNavigate() } label: { Label("Go to Album", systemImage: "square.stack") }
+        }
         Button { player.open(s.artistPath); onNavigate() } label: {
             Label(s.artist.isEmpty ? "Go to Artist" : "Go to \(s.artist)", systemImage: "person.crop.circle")
         }
