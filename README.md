@@ -25,17 +25,23 @@ notarized. When you download one in a browser, macOS marks it as quarantined and
 refuses to open it ("CloudPlayer can't be opened because Apple cannot check it for malicious
 software"). Removing the quarantine flag lets it run.
 
-**One-liner** (downloads the right build for your Mac, installs it to `/Applications`, and launches it):
+**One-liner to install or update** (downloads the right build for your Mac, quits CloudPlayer if
+it's running, replaces it in `/Applications`, and launches the new version):
 
 ```sh
 ARCH=$([ "$(uname -m)" = arm64 ] && echo apple-silicon || echo intel) && \
 curl -fL -o /tmp/CloudPlayer.zip \
   "https://github.com/rzachulec/CloudPlayer/releases/download/latest/CloudPlayer-macos-$ARCH.zip" && \
+{ pgrep -xq CloudPlayer && osascript -e 'quit app "CloudPlayer"' && while pgrep -xq CloudPlayer; do sleep 0.5; done; true; } && \
 rm -rf /Applications/CloudPlayer.app && \
 ditto -x -k /tmp/CloudPlayer.zip /Applications && \
+rm -f /tmp/CloudPlayer.zip && \
 xattr -dr com.apple.quarantine /Applications/CloudPlayer.app && \
 open /Applications/CloudPlayer.app
 ```
+
+Run the same command again whenever you want the newest build. You stay signed in across
+updates: your SoundCloud session is stored in `~/Library`, not inside the app.
 
 **Step by step**, if you already downloaded the zip in your browser:
 
