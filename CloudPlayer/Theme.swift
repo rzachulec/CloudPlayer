@@ -960,9 +960,12 @@ enum Theme {
 
     /* Hero action row (Injected heroActions moves the buttons here): track-count pill + white
        glass buttons on the artwork tint, like the track header's comment field and buttons. */
+    /* z-index: .fullHero__playerArea (the waveform, a later sibling) spans the bottom of the
+       hero and would otherwise sit on top of the row and swallow every click on its buttons. */
     html body .fullHero__tracksSummary.cp-hero-row {
       display: flex !important; align-items: center !important; gap: 8px !important;
       left: 32px !important; bottom: 32px !important; right: auto !important;
+      position: absolute !important; z-index: 2 !important;
     }
     html body .cp-hero-row :is(.cp-moved, .cp-moved .soundActions, .cp-moved .sc-button-group, .cp-moved .purchaseLink__container) {
       display: flex !important; align-items: center !important; gap: 8px !important; float: none !important;
