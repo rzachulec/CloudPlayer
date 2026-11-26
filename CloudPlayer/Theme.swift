@@ -277,10 +277,9 @@ enum Theme {
       background: linear-gradient(to bottom, rgba(var(--cp-bg-rgb), 0), var(--cp-bg)) !important;
       background-image: linear-gradient(to bottom, rgba(var(--cp-bg-rgb), 0), var(--cp-bg)) !important;
     }
-    /* Hide the Fans leaderboard section on track pages before first paint. */
+    /* Hide the Fans leaderboard section on track pages (and its single-child Box wrapper). */
     .cp-fans-module,
-    .MuiStack-root:has(> :first-child [aria-label="More info about fans data"]),
-    div:has(> .MuiStack-root:only-child > :first-child [aria-label="More info about fans data"]) {
+    div.MuiBox-root:not(.MuiStack-root):has(> .cp-fans-module:only-child) {
       display: none !important;
     }
     .cp-toast, .MuiSnackbar-root { display: none !important; }

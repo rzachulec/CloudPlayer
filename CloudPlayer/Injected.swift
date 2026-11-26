@@ -286,10 +286,8 @@ enum Injected {
         // Elements already inspected (computed-style checks are costly and this runs per mutation frame).
         const tidyChecked = new WeakSet();
         const FADE_SKIP = 'section[aria-label="Track header"], .MuiAvatar-root, .MuiChip-root, button, a, [role="button"], img, [class*="artwork" i], [class*="badge" i], [class*="skeleton" i]';
-        const isFansHeaderOnly = (el) => {
-          const t = (el.textContent || '').replace(/\\s+/g, ' ').trim();
-          return /^fans(\\s*\\*?\\s*only visible to you)?$/i.test(t);
-        };
+        const hasFansBody = (el) => !!el.querySelector('[role="tablist"]') ||
+          /\\b(fans who (have )?played|climb the leaderboard|take this spot)\\b/i.test(el.textContent || '');
         const isFansStop = (el) => !el || el === document.body || el === document.documentElement ||
           el.id === 'main' || el.id === 'navigation-shell-right-side-container' ||
           el.matches('main, aside, nav, header, section[aria-label="Track header"]') ||
@@ -302,17 +300,10 @@ enum Injected {
           ];
           for (const a of anchors) {
             if (a.closest('.cp-fans-module')) continue;
-            let hdr = a;
-            while (hdr.parentElement && !isFansStop(hdr.parentElement) && isFansHeaderOnly(hdr.parentElement)) {
-              hdr = hdr.parentElement;
-            }
-            let mod = hdr.parentElement;
-            if (!mod || isFansStop(mod) || hasNonFansH2(mod)) continue;
-            while (mod.parentElement && mod.parentElement.children.length === 1 && !isFansStop(mod.parentElement) && !hasNonFansH2(mod.parentElement)) {
-              mod = mod.parentElement;
-            }
+            let mod = a.parentElement;
+            while (mod && !isFansStop(mod) && !hasFansBody(mod)) mod = mod.parentElement;
+            if (!mod || isFansStop(mod) || mod.children.length > 4 || hasNonFansH2(mod)) continue;
             mod.classList.add('cp-fans-module');
-            mod.style.setProperty('display', 'none', 'important');
           }
         };
         const tidyTrackFrame = () => {
@@ -385,7 +376,10 @@ enum Injected {
         let queued = false;
         const runFramePass = () => { tag(); hideLegal(); tidyTrackFrame(); tagFrameToasts(); };
         document.addEventListener('DOMContentLoaded', runFramePass);
-        new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; runFramePass(); }); } })
+        new MutationObserver(() => {
+          hideFansSection();
+          if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; runFramePass(); }); }
+        })
           .observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['src'] });
         \(Menus.js)
         })();
