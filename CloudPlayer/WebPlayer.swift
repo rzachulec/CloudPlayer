@@ -113,6 +113,7 @@ final class WebPlayer: NSObject, ObservableObject {
 
     let webView: WKWebView
     private var popups: [NSWindow] = []
+    private var signInBusyWork: DispatchWorkItem?
     private var theme: Theme.Snapshot
     private var observations: [NSKeyValueObservation] = []
     #if DEBUG
@@ -133,6 +134,11 @@ final class WebPlayer: NSObject, ObservableObject {
         #if DEBUG
         // -cpEphemeral YES: throwaway cookies/storage (test the signed-out flow without logging out).
         if UserDefaults.standard.bool(forKey: "cpEphemeral") { config.websiteDataStore = .nonPersistent() }
+        // -cpAuthClick facebook|google|apple: the sign-in form clicks that button by itself, so
+        // its popup must be allowed without a real click.
+        if UserDefaults.standard.string(forKey: "cpAuthClick") != nil {
+            config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        }
         #endif
         config.applicationNameForUserAgent = "Version/18.0 Safari/605.1.15"
         webView = PageWebView(frame: .zero, configuration: config)
@@ -453,6 +459,12 @@ extension WebPlayer: WKScriptMessageHandler {
             }
             return
         }
+        #if DEBUG
+        if let text = d["debugAuthLog"] as? String {
+            debugAuthLog("page: \(text)")
+            return
+        }
+        #endif
         if d["authFrameReady"] as? Bool == true {
             if auth == .signedOut && !signInReady { signInReady = true }
             return
@@ -641,7 +653,12 @@ extension WebPlayer: WKHTTPCookieStoreObserver {
 
 extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        guard webView === self.webView else { return }
+        guard webView === self.webView else {
+            #if DEBUG
+            debugAuthLog("popup commit \(webView.url.map { "\($0.host ?? "")\($0.path)" } ?? "")")
+            #endif
+            return
+        }
         awaitingFreshPage = false
         if noUserSince != nil { noUserReloads += 1 }
         #if DEBUG
@@ -683,6 +700,10 @@ extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
                           height: max(windowFeatures.height?.doubleValue ?? 0, 640))
         let popup = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration)
         popup.uiDelegate = self
+        #if DEBUG
+        popup.navigationDelegate = self   // logs its pages (didCommit)
+        debugAuthLog("popup opened for \(url?.absoluteString ?? "nil")")
+        #endif
         let win = NSWindow(contentRect: popup.frame, styleMask: [.titled, .closable, .resizable],
                            backing: .buffered, defer: false)
         win.isReleasedWhenClosed = false
@@ -696,7 +717,30 @@ extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
         }
         win.makeKeyAndOrderFront(nil)
         popups.append(win)
+        // Closed with its close button (not by the page): forget it too.
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: win, queue: .main) { [weak self, weak win] _ in
+            MainActor.assumeIsolated {
+                guard let self, let win, let i = self.popups.firstIndex(of: win) else { return }
+                self.popups.remove(at: i)
+                self.popupsChanged()
+            }
+        }
+        popupsChanged()
         return popup
+    }
+
+    /// A provider sign-in is in flight while its popup is open, and for a moment after it
+    /// closes (SoundCloud is still exchanging the result for a session): the page must not
+    /// restart its sign-in meanwhile (CP.setSignIn).
+    private func popupsChanged() {
+        signInBusyWork?.cancel()
+        if !popups.isEmpty {
+            run("CP.signInBusy = true")
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in self?.run("CP.signInBusy = false") }
+        signInBusyWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
     }
 
     private static func providerTitle(_ host: String) -> String {
@@ -708,8 +752,7 @@ extension WebPlayer: WKNavigationDelegate, WKUIDelegate {
 
     func webViewDidClose(_ webView: WKWebView) {
         guard let i = popups.firstIndex(where: { $0.contentView === webView }) else { return }
-        popups[i].close()
-        popups.remove(at: i)
+        popups[i].close()   // willClose observer removes it
     }
 
     private static func isAuthHost(_ host: String) -> Bool {

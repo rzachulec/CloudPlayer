@@ -303,12 +303,15 @@ enum Injected {
     static func authFrameScript() -> String {
         #if DEBUG
         let debug = true
+        let autoClick = UserDefaults.standard.string(forKey: "cpAuthClick") ?? ""   // -cpAuthClick facebook
         #else
         let debug = false
+        let autoClick = ""
         #endif
         return """
         (() => {
         if (location.hostname !== 'secure.soundcloud.com' || window === window.top || window.CPAuth) return;
+        const AUTO_CLICK = \(js(autoClick));
         window.CPAuth = true;
         const st = document.createElement('style'); st.id = 'cp-auth';
         st.textContent = \(js(Theme.authCSS()));
@@ -325,6 +328,11 @@ enum Injected {
           posted = true;
           // (Not requestAnimationFrame: WebKit throttles it in cross-origin frames.)
           setTimeout(() => post({ authFrameReady: true }), 60);
+          if (AUTO_CLICK) setTimeout(() => {
+            const b = document.querySelector('[data-testid="sign_in_up_provider_' + AUTO_CLICK + '"]');
+            post({ debugAuthLog: 'auto-click ' + AUTO_CLICK + (b ? '' : ' (no button)') });
+            if (b) b.click();
+          }, 1500);
         };
         window.addEventListener('hashchange', check);
         new MutationObserver(() => {
@@ -1715,17 +1723,26 @@ enum Injected {
       },
       setVolume(v) { CP.volume = v; if (CP.media) CP.media.volume = v; },
 
-      // Signed out: show only SoundCloud's sign-in form (signInCSS) and keep its modal open:
-      // it closes on Escape or a click outside, which here would leave an empty window.
+      // Signed out: show only SoundCloud's sign-in form (signInCSS) and re-open its modal if
+      // it gets closed (Escape), which here would leave an empty window. Re-opening restarts
+      // SoundCloud's sign-in (new PKCE / nonce), so never while one may be in flight: not
+      // while a provider popup is open (CP.signInBusy, set by the app), and only after the
+      // modal has stayed closed for a while (SoundCloud closes it itself when sign-in succeeds).
+      signInBusy: false,
       setSignIn(on) {
         document.documentElement.classList.toggle('cp-signin', on);
         clearInterval(signInTimer); signInTimer = 0;
         if (!on) return;
+        let opened = false, closedTicks = 0;
         const keepOpen = () => {
           const w = $('.webAuthContainerWrapper');
-          if (w && !w.classList.contains('hidden')) return;
+          if ((w && !w.classList.contains('hidden')) || CP.signInBusy) { closedTicks = 0; return; }
+          if (opened && ++closedTicks < 6) return;   // ~3.6 s
           const b = $('button.loginButton');
-          if (b) b.click();
+          if (!b) return;
+          if (DEBUG) window.webkit.messageHandlers.cp.postMessage({ debugAuthLog: 'keepOpen: ' + (w ? w.className : 'no wrapper') + ' → open' });
+          opened = true; closedTicks = 0;
+          b.click();
         };
         keepOpen();
         signInTimer = setInterval(keepOpen, 600);
