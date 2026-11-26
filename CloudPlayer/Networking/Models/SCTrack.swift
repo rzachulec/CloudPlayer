@@ -172,3 +172,50 @@ struct SCCollectionPage<Element: Decodable & Sendable>: Decodable, Sendable {
 }
 
 private struct AnyDecodableSkip: Decodable {}
+
+/// Search facet chip returned by `/search/tracks?facet=genre`.
+struct SCSearchFacet: Codable, Hashable, Identifiable, Sendable {
+    let value: String
+    let count: Int?
+    let filter: String?
+
+    var id: String { value }
+}
+
+struct SCSearchFacetGroup: Codable, Sendable {
+    let name: String
+    let facets: [SCSearchFacet]
+}
+
+struct SCSearchTrackPage: Decodable, Sendable {
+    let collection: [SCTrack]
+    let nextHref: String?
+    let facets: [SCSearchFacetGroup]?
+
+    enum CodingKeys: String, CodingKey {
+        case collection
+        case nextHref = "next_href"
+        case facets
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.nextHref = try container.decodeIfPresent(String.self, forKey: .nextHref)
+        self.facets = try container.decodeIfPresent([SCSearchFacetGroup].self, forKey: .facets)
+
+        var unkeyed = try container.nestedUnkeyedContainer(forKey: .collection)
+        var items: [SCTrack] = []
+        while !unkeyed.isAtEnd {
+            if let item = try? unkeyed.decode(SCTrack.self) {
+                items.append(item)
+            } else {
+                _ = try? unkeyed.decode(AnyDecodableSkip.self)
+            }
+        }
+        self.collection = items
+    }
+
+    var genreTags: [SCSearchFacet] {
+        facets?.first(where: { $0.name == "genre" })?.facets ?? []
+    }
+}

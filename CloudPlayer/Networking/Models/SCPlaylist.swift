@@ -64,6 +64,27 @@ struct SCPlaylist: Codable, Identifiable, Hashable, Sendable {
     var missingTrackIDs: [Int] {
         tracks?.compactMap { $0.fullTrack == nil ? $0.id : nil } ?? []
     }
+
+    /// Merges hydrated tracks from `/users/{id}/playlists_without_albums` into a summary playlist
+    /// from `/me/library/all` so coverless own playlists display their first track's artwork.
+    func mergingTracks(from detailed: SCPlaylist) -> SCPlaylist {
+        SCPlaylist(
+            id: id ?? detailed.id,
+            urn: urn ?? detailed.urn,
+            title: title,
+            permalinkURL: permalinkURL ?? detailed.permalinkURL,
+            artworkURL: artworkURL ?? detailed.artworkURL,
+            calculatedArtworkURL: calculatedArtworkURL ?? detailed.calculatedArtworkURL,
+            description: description ?? detailed.description,
+            isAlbum: isAlbum ?? detailed.isAlbum,
+            trackCount: trackCount ?? detailed.trackCount,
+            duration: duration ?? detailed.duration,
+            likesCount: likesCount ?? detailed.likesCount,
+            genre: genre ?? detailed.genre,
+            user: user ?? detailed.user,
+            tracks: (tracks?.isEmpty == false) ? tracks : detailed.tracks
+        )
+    }
 }
 
 /// Decodes either a full `SCTrack` or an ID-only `{ "id": 12345 }` stub inside a playlist's `tracks` array.

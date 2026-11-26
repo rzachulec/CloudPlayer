@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Native Playlists / Albums library screen backed by `/me/library/all`.
+/// Native Playlists / Albums library screen backed by `/me/library/all` + `/users/{id}/playlists_without_albums`
+/// so user-created playlists without a custom cover automatically display their first track's artwork.
 struct LibraryCollectionsView: View {
     enum Kind {
         case playlists
@@ -73,11 +74,14 @@ struct LibraryCollectionsView: View {
     }
 
     private var cacheKey: String {
-        "library:\(kind.cacheKeySuffix):\(app.currentUser?.id ?? 0):v1"
+        "library:\(kind.cacheKeySuffix):\(app.currentUser?.id ?? 0):v2"
     }
 
-    private func matchesKind(_ playlist: SCPlaylist) -> Bool {
-        let isAlbum = playlist.isAlbum == true
+    private func matchesKind(_ entry: SCLibraryItem) -> Bool {
+        // System playlists (stations) belong in StationsView
+        if (entry.type ?? "").contains("system-playlist") { return false }
+        guard let pl = entry.resolvedPlaylist else { return false }
+        let isAlbum = pl.isAlbum == true
         return kind == .albums ? isAlbum : !isAlbum
     }
 
@@ -93,13 +97,61 @@ struct LibraryCollectionsView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let page = try await app.api.fetchLibraryCollections(limit: 50)
-            let filtered = page.collection.compactMap(\.resolvedPlaylist).filter(matchesKind)
-            items = filtered
+            async let libTask = app.api.fetchLibraryCollections(limit: 50)
+            async let ownTask: [SCPlaylist] = {
+                guard kind == .playlists, let uid = app.currentUser?.id else { return [] }
+                return (try? await app.api.fetchUserOwnPlaylists(userID: uid, limit: 50)) ?? []
+            }()
+
+            let page = try await libTask
+            let ownPlaylists = await ownTask
+            let ownByID = Dictionary(uniqueKeysWithValues: ownPlaylists.compactMap { pl in pl.id.map { ($0, pl) } })
+
+            var merged: [SCPlaylist] = page.collection
+                .filter(matchesKind)
+                .compactMap(\.resolvedPlaylist)
+                .map { pl in
+                    if let id = pl.id, let detailed = ownByID[id] {
+                        return pl.mergingTracks(from: detailed)
+                    }
+                    return pl
+                }
+
+            // Also include any owned playlists not present on the first page of /me/library/all
+            let existingIDs = Set(merged.compactMap(\.id))
+            for own in ownPlaylists where own.id.map({ !existingIDs.contains($0) }) ?? false {
+                merged.append(own)
+            }
+
+            items = merged
             nextHref = page.nextHref
-            await app.cache.save(filtered, key: cacheKey)
+            await app.cache.save(merged, key: cacheKey)
+
+            // Hydrate coverless liked playlists in the background so they also show first-track artwork
+            await hydrateMissingCovers(in: merged)
         } catch {
             if items.isEmpty { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func hydrateMissingCovers(in playlists: [SCPlaylist]) async {
+        let missing = playlists.filter {
+            $0.artworkURL == nil && $0.calculatedArtworkURL == nil && $0.hydratedTracks.isEmpty && $0.id != nil
+        }.prefix(12)
+        guard !missing.isEmpty else { return }
+
+        var updated = items
+        var changed = false
+        for pl in missing {
+            guard let id = pl.id, let detailed = try? await app.api.fetchPlaylist(id: id) else { continue }
+            if let idx = updated.firstIndex(where: { $0.id == id }) {
+                updated[idx] = updated[idx].mergingTracks(from: detailed)
+                changed = true
+            }
+        }
+        if changed {
+            items = updated
+            await app.cache.save(updated, key: cacheKey)
         }
     }
 
@@ -111,8 +163,9 @@ struct LibraryCollectionsView: View {
             if let page = try? await app.api.fetchLibraryCollections(nextHref: next) {
                 let seen = Set(items.map(\.stableID))
                 let more = page.collection
+                    .filter(matchesKind)
                     .compactMap(\.resolvedPlaylist)
-                    .filter { matchesKind($0) && !seen.contains($0.stableID) }
+                    .filter { !seen.contains($0.stableID) }
                 items.append(contentsOf: more)
                 nextHref = page.nextHref
             }
@@ -120,11 +173,13 @@ struct LibraryCollectionsView: View {
     }
 }
 
-/// Native Stations view backed by `/me/personalized-stations`.
+/// Native Stations / Radio view combining liked stations (`system-playlist-like`) and
+/// SoundCloud's curated station shelves from `/mixed-selections`.
 struct StationsView: View {
     @Bindable var app: AppController
 
-    @State private var stations: [SCPlaylist] = []
+    @State private var likedStations: [SCPlaylist] = []
+    @State private var discoverShelves: [SCMixedSelection] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -132,29 +187,57 @@ struct StationsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Stations").font(.system(size: 24, weight: .bold))
-                    Text("Personalized radio stations").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("Your saved stations and personalized radio")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                 }
 
-                if isLoading && stations.isEmpty {
+                if isLoading && likedStations.isEmpty && discoverShelves.isEmpty {
                     TileGridSkeleton()
-                } else if let errorMessage, stations.isEmpty {
+                } else if let errorMessage, likedStations.isEmpty && discoverShelves.isEmpty {
                     VStack(spacing: 10) {
                         Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
                         Button("Retry") { Task { await refresh() } }.buttonStyle(.borderedProminent)
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
-                } else if stations.isEmpty {
-                    Text("No personalized stations available.")
+                } else if likedStations.isEmpty && discoverShelves.isEmpty {
+                    Text("No stations available yet.")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
-                    LazyVGrid(columns: gridColumns, spacing: 20) {
-                        ForEach(stations, id: \.stableID) { station in
-                            PlaylistCard(playlist: station, app: app)
+                    if !likedStations.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Your Stations")
+                                .font(.system(size: 17, weight: .bold))
+                            LazyVGrid(columns: gridColumns, spacing: 20) {
+                                ForEach(likedStations, id: \.stableID) { station in
+                                    PlaylistCard(playlist: station, app: app)
+                                }
+                            }
+                        }
+                    }
+
+                    ForEach(discoverShelves) { shelf in
+                        VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(shelf.title).font(.system(size: 17, weight: .bold))
+                                if let desc = shelf.description, !desc.isEmpty {
+                                    Text(desc).font(.system(size: 12)).foregroundStyle(.secondary)
+                                }
+                            }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                LazyHStack(spacing: 16) {
+                                    ForEach(shelf.items?.collection ?? [], id: \.stableID) { station in
+                                        PlaylistCard(playlist: station, app: app)
+                                            .frame(width: 174)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
                         }
                     }
                 }
@@ -169,11 +252,18 @@ struct StationsView: View {
         }
     }
 
-    private var cacheKey: String { "stations:\(app.currentUser?.id ?? 0):v1" }
+    private struct CachedStations: Codable {
+        let liked: [SCPlaylist]
+        let discover: [SCMixedSelection]
+    }
+
+    private var cacheKey: String { "stations:\(app.currentUser?.id ?? 0):v2" }
 
     private func loadStaleWhileRevalidate() async {
-        if stations.isEmpty, let cached = await app.cache.load([SCPlaylist].self, key: cacheKey), !cached.isEmpty {
-            stations = cached
+        if likedStations.isEmpty && discoverShelves.isEmpty,
+           let cached = await app.cache.load(CachedStations.self, key: cacheKey) {
+            likedStations = cached.liked
+            discoverShelves = cached.discover
         }
         await refresh()
     }
@@ -183,11 +273,14 @@ struct StationsView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let fetched = try await app.api.fetchPersonalizedStations(limit: 30)
-            stations = fetched
-            await app.cache.save(fetched, key: cacheKey)
+            let result = try await app.api.fetchStations()
+            likedStations = result.liked
+            discoverShelves = result.discover
+            await app.cache.save(CachedStations(liked: result.liked, discover: result.discover), key: cacheKey)
         } catch {
-            if stations.isEmpty { errorMessage = error.localizedDescription }
+            if likedStations.isEmpty && discoverShelves.isEmpty {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }

@@ -183,16 +183,46 @@ actor SoundCloudAPI {
 
     // MARK: - Search & Library Endpoints
 
-    func searchTracks(query: String, limit: Int = 30, nextHref: String? = nil) async throws -> SCCollectionPage<SCTrack> {
+    func searchTracks(
+        query: String,
+        genreOrTag: String? = nil,
+        createdAt: String? = nil,
+        duration: String? = nil,
+        license: String? = nil,
+        limit: Int = 30,
+        nextHref: String? = nil
+    ) async throws -> SCSearchTrackPage {
         if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
-        return try await get(
-            path: "/search/tracks",
+        var items = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "linked_partitioning", value: "1"),
+            URLQueryItem(name: "facet", value: "genre"),
+        ]
+        if let genreOrTag, !genreOrTag.isEmpty {
+            items.append(URLQueryItem(name: "filter.genre_or_tag", value: genreOrTag))
+        }
+        if let createdAt, !createdAt.isEmpty {
+            items.append(URLQueryItem(name: "filter.created_at", value: createdAt))
+        }
+        if let duration, !duration.isEmpty {
+            items.append(URLQueryItem(name: "filter.duration", value: duration))
+        }
+        if let license, !license.isEmpty {
+            items.append(URLQueryItem(name: "filter.license", value: license))
+        }
+        return try await get(path: "/search/tracks", query: items)
+    }
+
+    func fetchUserOwnPlaylists(userID: Int, limit: Int = 50) async throws -> [SCPlaylist] {
+        let page: SCCollectionPage<SCPlaylist> = try await get(
+            path: "/users/\(userID)/playlists_without_albums",
             query: [
-                URLQueryItem(name: "q", value: query),
                 URLQueryItem(name: "limit", value: String(limit)),
                 URLQueryItem(name: "linked_partitioning", value: "1"),
             ]
         )
+        return page.collection
     }
 
     func searchPlaylists(query: String, limit: Int = 30, nextHref: String? = nil) async throws -> SCCollectionPage<SCPlaylist> {
@@ -253,12 +283,23 @@ actor SoundCloudAPI {
         )
     }
 
-    func fetchPersonalizedStations(limit: Int = 30) async throws -> [SCPlaylist] {
-        let page: SCCollectionPage<SCStationItem> = try await get(
-            path: "/me/personalized-stations",
-            query: [URLQueryItem(name: "limit", value: String(limit))]
-        )
-        return page.collection.compactMap(\.playlist)
+    /// Fetches liked stations (`system-playlist-like` in `/me/library/all`) plus SoundCloud's
+    /// station/radio shelves from `/mixed-selections`.
+    func fetchStations() async throws -> (liked: [SCPlaylist], discover: [SCMixedSelection]) {
+        async let libraryTask = fetchLibraryCollections(limit: 50)
+        async let mixedTask = fetchMixedSelections(limit: 15)
+
+        let liked = (try? await libraryTask)?.collection
+            .filter { ($0.type ?? "").contains("system-playlist") }
+            .compactMap(\.resolvedPlaylist) ?? []
+
+        let selections = (try? await mixedTask) ?? []
+        let stationShelves = selections.filter { sel in
+            let t = sel.title.lowercased()
+            return (t.contains("station") || t.contains("radio") || t.contains("mixed for"))
+                && (sel.items?.collection.isEmpty == false)
+        }
+        return (liked, stationShelves)
     }
 
     // MARK: - Core Request Pipeline

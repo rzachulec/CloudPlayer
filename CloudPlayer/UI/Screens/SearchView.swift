@@ -10,13 +10,79 @@ enum SearchScope: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+enum SearchCreatedFilter: String, CaseIterable, Identifiable {
+    case any = ""
+    case lastHour = "last_hour"
+    case lastDay = "last_day"
+    case lastWeek = "last_week"
+    case lastMonth = "last_month"
+    case lastYear = "last_year"
+
+    var id: Self { self }
+    var label: String {
+        switch self {
+        case .any: "Any time"
+        case .lastHour: "Past hour"
+        case .lastDay: "Past day"
+        case .lastWeek: "Past week"
+        case .lastMonth: "Past month"
+        case .lastYear: "Past year"
+        }
+    }
+}
+
+enum SearchDurationFilter: String, CaseIterable, Identifiable {
+    case any = ""
+    case short = "short"
+    case medium = "medium"
+    case long = "long"
+    case epic = "epic"
+
+    var id: Self { self }
+    var label: String {
+        switch self {
+        case .any: "Any length"
+        case .short: "< 2 min"
+        case .medium: "2–10 min"
+        case .long: "10–30 min"
+        case .epic: "> 30 min"
+        }
+    }
+}
+
+enum SearchLicenseFilter: String, CaseIterable, Identifiable {
+    case any = ""
+    case toListen = "to_listen"
+    case toShare = "to_share"
+    case toUseCommercially = "to_use_commercially"
+    case toModifyCommercially = "to_modify_commercially"
+
+    var id: Self { self }
+    var label: String {
+        switch self {
+        case .any: "Any license"
+        case .toListen: "To listen to"
+        case .toShare: "To share"
+        case .toUseCommercially: "Commercial use"
+        case .toModifyCommercially: "Modify commercially"
+        }
+    }
+}
+
 /// Native Search screen with 4 scopes (Tracks, Playlists, Albums, People),
-/// instant scope switching, Play All, shimmering skeletons, and infinite scroll.
+/// live tag/genre facet chips, track-specific filters (Added, Length, License),
+/// Play All, shimmering skeletons, and infinite scroll.
 struct SearchView: View {
     let query: String
     @Bindable var app: AppController
 
     @State private var scope: SearchScope = .tracks
+    @State private var selectedTag: String?
+    @State private var createdFilter: SearchCreatedFilter = .any
+    @State private var durationFilter: SearchDurationFilter = .any
+    @State private var licenseFilter: SearchLicenseFilter = .any
+    @State private var tagFacets: [SCSearchFacet] = []
+
     @State private var tracks: [SCTrack] = []
     @State private var playlists: [SCPlaylist] = []
     @State private var albums: [SCPlaylist] = []
@@ -34,10 +100,21 @@ struct SearchView: View {
 
     private let gridColumns = [GridItem(.adaptive(minimum: 165, maximum: 220), spacing: 18)]
 
+    private var trackFilterKey: String {
+        "\(selectedTag ?? "")|\(createdFilter.rawValue)|\(durationFilter.rawValue)|\(licenseFilter.rawValue)"
+    }
+
+    private var hasActiveTrackFilters: Bool {
+        selectedTag != nil || createdFilter != .any || durationFilter != .any || licenseFilter != .any
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
                 header
+                if scope == .tracks {
+                    trackFiltersBar
+                }
                 content
             }
             .padding(.horizontal, 20)
@@ -45,11 +122,11 @@ struct SearchView: View {
             .padding(.bottom, 92)
         }
         .background(Color(nsColor: .textBackgroundColor))
-        .task(id: "\(query)|\(scope.rawValue)") {
-            await loadScopeIfNeeded()
+        .task(id: "\(query)|\(scope.rawValue)|\(scope == .tracks ? trackFilterKey : "")") {
+            await loadCurrentScope()
         }
         .onChange(of: query) { _, _ in
-            resetResults()
+            resetAll()
         }
     }
 
@@ -88,9 +165,131 @@ struct SearchView: View {
         }
     }
 
+    private var trackFiltersBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(SearchCreatedFilter.allCases) { option in
+                        Button {
+                            createdFilter = option
+                        } label: {
+                            if createdFilter == option {
+                                Label(option.label, systemImage: "checkmark")
+                            } else {
+                                Text(option.label)
+                            }
+                        }
+                    }
+                } label: {
+                    filterPillLabel(
+                        icon: "calendar",
+                        title: createdFilter == .any ? "Added" : createdFilter.label,
+                        active: createdFilter != .any
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                Menu {
+                    ForEach(SearchDurationFilter.allCases) { option in
+                        Button {
+                            durationFilter = option
+                        } label: {
+                            if durationFilter == option {
+                                Label(option.label, systemImage: "checkmark")
+                            } else {
+                                Text(option.label)
+                            }
+                        }
+                    }
+                } label: {
+                    filterPillLabel(
+                        icon: "clock",
+                        title: durationFilter == .any ? "Length" : durationFilter.label,
+                        active: durationFilter != .any
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                Menu {
+                    ForEach(SearchLicenseFilter.allCases) { option in
+                        Button {
+                            licenseFilter = option
+                        } label: {
+                            if licenseFilter == option {
+                                Label(option.label, systemImage: "checkmark")
+                            } else {
+                                Text(option.label)
+                            }
+                        }
+                    }
+                } label: {
+                    filterPillLabel(
+                        icon: "doc.text",
+                        title: licenseFilter == .any ? "License" : licenseFilter.label,
+                        active: licenseFilter != .any
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                if hasActiveTrackFilters {
+                    Button("Clear filters") {
+                        selectedTag = nil
+                        createdFilter = .any
+                        durationFilter = .any
+                        licenseFilter = .any
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11.5))
+                }
+                Spacer()
+            }
+
+            if !tagFacets.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(tagFacets.prefix(16)) { facet in
+                            let isSelected = selectedTag == facet.value
+                            Button {
+                                selectedTag = isSelected ? nil : facet.value
+                            } label: {
+                                Text("#\(facet.value)")
+                                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                                    .foregroundStyle(isSelected ? Color.white : Color.primary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule().fill(isSelected ? Color.accentColor : Color.primary.opacity(0.08))
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+            }
+        }
+    }
+
+    private func filterPillLabel(icon: String, title: String, active: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 10.5))
+            Text(title).font(.system(size: 11.5, weight: active ? .semibold : .medium))
+            Image(systemName: "chevron.down").font(.system(size: 8.5, weight: .semibold))
+        }
+        .foregroundStyle(active ? Color.accentColor : Color.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(active ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.07))
+        )
+    }
+
     @ViewBuilder
     private var content: some View {
-        if isLoading && !loadedScopes.contains(scope) {
+        if isLoading && (scope == .tracks || !loadedScopes.contains(scope)) && currentIsEmpty {
             if scope == .tracks {
                 LazyVStack(spacing: 4) {
                     ForEach(0..<12, id: \.self) { _ in TrackRowSkeleton() }
@@ -103,7 +302,7 @@ struct SearchView: View {
                 Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
                 Button("Retry") {
                     loadedScopes.remove(scope)
-                    Task { await loadScopeIfNeeded() }
+                    Task { await loadCurrentScope(force: true) }
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -185,7 +384,7 @@ struct SearchView: View {
         }
     }
 
-    private func resetResults() {
+    private func resetAll() {
         tracks = []
         playlists = []
         albums = []
@@ -194,21 +393,38 @@ struct SearchView: View {
         playlistsNext = nil
         albumsNext = nil
         usersNext = nil
+        selectedTag = nil
+        createdFilter = .any
+        durationFilter = .any
+        licenseFilter = .any
+        tagFacets = []
         loadedScopes = []
         errorMessage = nil
     }
 
-    private func loadScopeIfNeeded() async {
-        guard !loadedScopes.contains(scope) else { return }
+    private func loadCurrentScope(force: Bool = false) async {
+        if scope != .tracks, !force, loadedScopes.contains(scope) { return }
         isLoading = true
         errorMessage = nil
+        if scope == .tracks { tracks = [] }
         defer { isLoading = false }
+
         do {
             switch scope {
             case .tracks:
-                let page = try await app.api.searchTracks(query: query)
+                let page = try await app.api.searchTracks(
+                    query: query,
+                    genreOrTag: selectedTag,
+                    createdAt: createdFilter == .any ? nil : createdFilter.rawValue,
+                    duration: durationFilter == .any ? nil : durationFilter.rawValue,
+                    license: licenseFilter == .any ? nil : licenseFilter.rawValue
+                )
                 tracks = page.collection
                 tracksNext = page.nextHref
+                if tagFacets.isEmpty || selectedTag == nil {
+                    let facets = page.genreTags
+                    if !facets.isEmpty { tagFacets = facets }
+                }
             case .playlists:
                 let page = try await app.api.searchPlaylists(query: query)
                 playlists = page.collection
