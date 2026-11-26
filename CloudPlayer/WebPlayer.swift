@@ -54,6 +54,7 @@ struct TrackState: Equatable {
     var shuffle = false
     var repeatMode = RepeatMode.none
     var queueVisible = false
+    var albumPath = ""
 }
 
 /// Owns the SoundCloud web view (the audio engine) and exposes its state + controls.
@@ -97,16 +98,32 @@ final class WebPlayer: NSObject, ObservableObject {
         didSet {
             guard isHoveringPlayButton != oldValue else { return }
             if isHoveringPlayButton {
+                hoverLeaveWork?.cancel()
+                hoverLeaveWork = nil
                 scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                     guard let self, self.isHoveringPlayButton, event.window == self.webView.window else { return event }
                     self.hoverPlay = nil
                     self.isHoveringPlayButton = false
+                    self.run("CP.clearHoverTile()")
                     self.webView.scrollWheel(with: event)
                     return nil
                 }
-            } else if let m = scrollMonitor {
-                NSEvent.removeMonitor(m)
-                scrollMonitor = nil
+            } else {
+                if let m = scrollMonitor {
+                    NSEvent.removeMonitor(m)
+                    scrollMonitor = nil
+                }
+                if hoverPlay != nil {
+                    hoverLeaveWork?.cancel()
+                    // Let WebKit see the pointer first, then ask JS whether it is still on the tile:
+                    // it re-posts the button (hoverPlay message) or clears it (hoverPlay null).
+                    let work = DispatchWorkItem { [weak self] in
+                        guard let self, !self.isHoveringPlayButton else { return }
+                        self.run("CP.resyncHoverTile()")
+                    }
+                    hoverLeaveWork = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+                }
             }
         }
     }
@@ -204,9 +221,12 @@ final class WebPlayer: NSObject, ObservableObject {
     // MARK: Navigation
 
     /// Navigates inside SoundCloud's single-page app (keeps playback going).
-    func open(_ path: String) {
+    /// `replace`: replace the current history entry instead of adding one.
+    func open(_ path: String, replace: Bool = false) {
         guard !path.isEmpty else { return }
-        webView.evaluateJavaScript("window.CP ? CP.open(\(Injected.js(path))) : location.assign(\(Injected.js(path)))", completionHandler: nil)
+        let p = Injected.js(path)
+        let fallback = replace ? "location.replace(\(p))" : "location.assign(\(p))"
+        webView.evaluateJavaScript("window.CP ? CP.open(\(p), \(replace)) : \(fallback)", completionHandler: nil)
     }
 
     func search(_ query: String) {
@@ -451,6 +471,7 @@ extension WebPlayer: WKScriptMessageHandler {
                 let work = DispatchWorkItem { [weak self] in
                     guard let self, !self.isHoveringPlayButton else { return }
                     self.hoverPlay = nil
+                    self.run("CP.clearHoverTile()")
                 }
                 hoverLeaveWork = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
@@ -508,6 +529,7 @@ extension WebPlayer: WKScriptMessageHandler {
         s.shuffle = d["shuffle"] as? Bool ?? false
         s.repeatMode = RepeatMode(rawValue: d["repeat"] as? String ?? "") ?? .none
         s.queueVisible = d["queueVisible"] as? Bool ?? false
+        s.albumPath = d["albumPath"] as? String ?? ""
         let prevTrack = lastTrackPath
         if !s.trackPath.isEmpty { lastTrackPath = s.trackPath }
         if s != state { state = s }
@@ -578,7 +600,7 @@ extension WebPlayer: WKScriptMessageHandler {
             let gen = existing.id
             swipeTargetPath = target
             swipeFallbackWork?.cancel()
-            open(path)
+            open(path, replace: true)
             let fallback = DispatchWorkItem { [weak self] in
                 self?.revealIncoming(generation: gen)
             }
@@ -608,7 +630,7 @@ extension WebPlayer: WKScriptMessageHandler {
                         }
                     }
                 }
-                self.open(path)
+                self.open(path, replace: true)
                 let fallback = DispatchWorkItem { [weak self] in
                     self?.revealIncoming(generation: gen)
                 }
@@ -786,6 +808,13 @@ extension WebPlayer {
         let first = debugFirstLoad
         debugFirstLoad = false
         let defaults = UserDefaults.standard
+        if first, let specPath = defaults.string(forKey: "cpTourSpec"),
+           let outDir = defaults.string(forKey: "cpTourOut") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                self?.startDebugTour(specPath: specPath, outDir: outDir)
+            }
+            return
+        }
         if first, let js = defaults.string(forKey: "cpDebugEval") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                 self?.webView.evaluateJavaScript("window.__cpMarker = 1; window.__cpEval = (() => { try { return String(eval(\(Injected.js(js)))); } catch (e) { return 'ERR ' + e; } })()", completionHandler: nil)
@@ -814,6 +843,7 @@ extension WebPlayer {
     /// In-app (single-page) navigation doesn't fire didFinish, so also capture a few seconds
     /// after the URL changes; a newer navigation supersedes a pending capture.
     fileprivate func scheduleNavigationDump() {
+        if UserDefaults.standard.string(forKey: "cpTourSpec") != nil { return }
         debugNavGeneration += 1
         let generation = debugNavGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -898,6 +928,156 @@ extension WebPlayer {
             guard let tiff = out.tiffRepresentation,
                   let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
             try? png.write(to: Self.debugDir.appendingPathComponent("debug-window.png"))
+        }
+    }
+
+    fileprivate func startDebugTour(specPath: String, outDir: String) {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: specPath)),
+              let steps = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+            NSApp.terminate(nil)
+            return
+        }
+        let outURL = URL(fileURLWithPath: outDir)
+        try? FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
+        var vars: [String: String] = [:]
+        runTourStep(index: 0, steps: steps, outURL: outURL, vars: &vars)
+    }
+
+    private func runTourStep(index: Int, steps: [[String: Any]], outURL: URL, vars: inout [String: String]) {
+        guard index < steps.count else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
+            return
+        }
+        if !profilePath.isEmpty { vars["$PROFILE"] = profilePath }
+        let step = steps[index]
+        let name = (step["name"] as? String) ?? String(format: "step-%02d", index)
+        var path = (step["path"] as? String) ?? ""
+        for (k, v) in vars where !v.isEmpty {
+            path = path.replacingOccurrences(of: k, with: v)
+        }
+        let wait = (step["wait"] as? NSNumber)?.doubleValue ?? 4.5
+        let evalJS = step["eval"] as? String
+        let evalDelay = (step["evalDelay"] as? NSNumber)?.doubleValue ?? 2.2
+        let snapshotVars = vars
+
+        if path.contains("$") {
+            // Unresolved placeholder; skip cleanly and record note.
+            try? "{\"skipped\": \(Injected.js(path))}".write(
+                to: outURL.appendingPathComponent("\(name).json"), atomically: true, encoding: .utf8)
+            var nextVars = snapshotVars
+            runTourStep(index: index + 1, steps: steps, outURL: outURL, vars: &nextVars)
+            return
+        }
+
+        if !path.isEmpty {
+            if step["hardLoad"] as? Bool == true, let u = URL(string: "https://soundcloud.com" + path) {
+                webView.load(URLRequest(url: u))
+            } else {
+                open(path)
+            }
+        }
+
+        if let evalJS {
+            DispatchQueue.main.asyncAfter(deadline: .now() + evalDelay) { [weak self] in
+                self?.webView.evaluateJavaScript(evalJS) { res, _ in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        if let dict = res as? [String: String] {
+                            self.tourExtraVars.merge(dict) { _, new in new }
+                        } else if let s = res as? String, let d = s.data(using: .utf8),
+                                  let dict = (try? JSONSerialization.jsonObject(with: d)) as? [String: String] {
+                            self.tourExtraVars.merge(dict) { _, new in new }
+                        }
+                    }
+                }
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+            guard let self else { return }
+            self.captureTourArtifact(name: name, outURL: outURL) { [weak self] in
+                guard let self else { return }
+                var nextVars = snapshotVars
+                nextVars.merge(self.tourExtraVars) { _, new in new }
+                if !self.profilePath.isEmpty { nextVars["$PROFILE"] = self.profilePath }
+                self.runTourStep(index: index + 1, steps: steps, outURL: outURL, vars: &nextVars)
+            }
+        }
+    }
+
+    private var tourExtraVars: [String: String] {
+        get { (objc_getAssociatedObject(self, &Self.tourVarsKey) as? [String: String]) ?? [:] }
+        set { objc_setAssociatedObject(self, &Self.tourVarsKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
+    private static var tourVarsKey: UInt8 = 0
+
+    private func captureTourArtifact(name: String, outURL: URL, completion: @escaping @MainActor () -> Void) {
+        let inspectJS = #"""
+        (() => {
+          const vis = (el) => {
+            if (!el) return false;
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 1 && r.height > 1;
+          };
+          const rect = (el) => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; };
+          const summarizeDoc = (doc, label) => {
+            if (!doc) return null;
+            const headings = [...doc.querySelectorAll('h1, h2, h3, .sidebarHeader__title, .searchTitle__text, .collectionSection__subHeading')]
+              .filter(vis).slice(0, 40).map(e => ({ tag: e.tagName, cls: String(e.className || '').slice(0, 80), text: (e.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 100), r: rect(e) }));
+            const tabs = [...doc.querySelectorAll('.g-tabs, .g-tabs-link, [role="tablist"], [role="tab"], .profileTabs, .userInfoBar, .networkTabs, .settingsTabs, .tabs')]
+              .filter(vis).slice(0, 40).map(e => ({ tag: e.tagName, cls: String(e.className || '').slice(0, 80), text: (e.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 100), href: e.getAttribute && e.getAttribute('href'), r: rect(e) }));
+            const sidebars = [...doc.querySelectorAll('.l-sidebar-right, .l-sidebar-right > *, .l-sidebar-right .sidebarModule, .l-listen-wrapper .l-about-right, aside, [class*="sidebar" i], [class*="RightRail" i]')]
+              .filter(vis).slice(0, 40).map(e => ({ tag: e.tagName, cls: String(e.className || '').slice(0, 100), text: (e.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160), r: rect(e) }));
+            const links = [...new Set([...doc.querySelectorAll('a[href]')].filter(vis).map(a => a.getAttribute('href')).filter(Boolean))].slice(0, 120);
+            const buttons = [...doc.querySelectorAll('button, .sc-button, [role="button"]')].filter(vis).slice(0, 60)
+              .map(b => ({ cls: String(b.className || '').slice(0, 80), label: (b.getAttribute('aria-label') || b.getAttribute('title') || b.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80), r: rect(b) }));
+            return { label, url: doc.location ? doc.location.href : '', bodyClass: doc.body ? doc.body.className : '', scrollHeight: doc.documentElement ? doc.documentElement.scrollHeight : 0, headings, tabs, sidebars, buttons, links };
+          };
+          const frames = [];
+          for (const f of document.querySelectorAll('iframe')) {
+            if (!vis(f)) continue;
+            try { frames.push(summarizeDoc(f.contentDocument, f.src || 'iframe')); } catch (e) { frames.push({ label: f.src, crossOrigin: true, r: rect(f) }); }
+          }
+          return JSON.stringify({
+            url: location.href,
+            state: window.CP ? CP.state() : null,
+            main: summarizeDoc(document, 'main'),
+            frames
+          }, null, 2);
+        })()
+        """#
+        webView.evaluateJavaScript(inspectJS) { [weak self] res, _ in
+            MainActor.assumeIsolated {
+                guard let self else { completion(); return }
+                if let s = res as? String {
+                    try? s.write(to: outURL.appendingPathComponent("\(name).json"), atomically: true, encoding: .utf8)
+                }
+                guard let window = self.webView.window, window.isVisible,
+                      let frameView = window.contentView?.superview,
+                      let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else {
+                    completion()
+                    return
+                }
+                frameView.cacheDisplay(in: frameView.bounds, to: rep)
+                let webRect = self.webView.convert(self.webView.bounds, to: frameView)
+                let size = frameView.bounds.size
+                self.webView.takeSnapshot(with: nil) { image, _ in
+                    MainActor.assumeIsolated {
+                        let out = NSImage(size: size)
+                        out.lockFocus()
+                        image?.draw(in: webRect)
+                        rep.draw(in: NSRect(origin: .zero, size: size), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                        out.unlockFocus()
+                        if let tiff = out.tiffRepresentation,
+                           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                            try? png.write(to: outURL.appendingPathComponent("\(name).png"))
+                        }
+                        completion()
+                    }
+                }
+            }
         }
     }
 }
