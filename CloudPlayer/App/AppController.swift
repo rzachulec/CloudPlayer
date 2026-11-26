@@ -8,6 +8,8 @@ import OSLog
 final class AppController {
     let sessionStore: SessionStore
     let api: SoundCloudAPI
+    let audio: AudioEngine
+    let library: LibraryStore
 
     private(set) var currentUser: SCUser?
     private(set) var isValidatingSession = false
@@ -17,8 +19,11 @@ final class AppController {
 
     init(sessionStore: SessionStore? = nil, api: SoundCloudAPI? = nil) {
         let store = sessionStore ?? SessionStore()
+        let client = api ?? SoundCloudAPI()
         self.sessionStore = store
-        self.api = api ?? SoundCloudAPI()
+        self.api = client
+        self.audio = AudioEngine(api: client)
+        self.library = LibraryStore(api: client)
     }
 
     func start() {
@@ -67,12 +72,28 @@ final class AppController {
         }
     }
 
+    func toggleLikeCurrentTrack() {
+        guard let track = audio.currentTrack else { return }
+        library.toggleLike(trackID: track.id, userID: currentUser?.id ?? sessionStore.session?.userID)
+    }
+
+    func isCurrentTrackLiked() -> Bool {
+        guard let track = audio.currentTrack else { return false }
+        return library.isLiked(track.id)
+    }
+
     func signOut() {
+        audio.shutdown()
+        library.reset()
         currentUser = nil
         lastError = nil
         sessionStore.signOut()
         Task {
             await api.configure(session: nil)
         }
+    }
+
+    func shutdown() {
+        audio.shutdown()
     }
 }

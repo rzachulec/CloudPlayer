@@ -86,6 +86,35 @@ actor SoundCloudAPI {
         try await get(path: "/me")
     }
 
+    func fetchTrackLikes(userID: Int, limit: Int = 50, nextHref: String? = nil) async throws -> SCCollectionPage<SCLikeItem> {
+        if let nextHref, !nextHref.isEmpty {
+            return try await get(path: nextHref)
+        }
+        return try await get(
+            path: "/users/\(userID)/track_likes",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func fetchRelatedTracks(trackID: Int, limit: Int = 15) async throws -> [SCTrack] {
+        let page: SCCollectionPage<SCTrack> = try await get(
+            path: "/tracks/\(trackID)/related",
+            query: [URLQueryItem(name: "limit", value: String(limit))]
+        )
+        return page.collection
+    }
+
+    func likeTrack(userID: Int, trackID: Int) async throws {
+        _ = try await sendData(path: "/users/\(userID)/track_likes/\(trackID)", method: "PUT")
+    }
+
+    func unlikeTrack(userID: Int, trackID: Int) async throws {
+        _ = try await sendData(path: "/users/\(userID)/track_likes/\(trackID)", method: "DELETE")
+    }
+
     // MARK: - Core Request Pipeline
 
     func get<T: Decodable>(path: String, query: [URLQueryItem] = []) async throws -> T {
