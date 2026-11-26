@@ -14,16 +14,21 @@ enum Injected {
     /// custom.css (View → Edit Custom CSS…) rather than editing this.
     /// (SoundCloud's header and player bar are replaced by native UI; see Theme.nativeCSS.)
     static let debloatCSS = """
-    /* Upsells: "Upgrade now", Go+/Artist Pro promos, banners */
+    /* Upsells: "Upgrade now", Go+/Artist Pro promos, banners, OneTrust cookie SDK UI */
     [class*="upsell" i],
     .creatorSubscriptionsButton,
     .l-product-banners,
-    .announcements
+    .announcements,
+    #onetrust-consent-sdk,
+    #onetrust-banner-sdk,
+    #onetrust-pc-sdk,
+    .onetrust-pc-dark-filter,
+    #ot-sdk-btn-floating,
+    .ot-sdk-container
     { display: none !important; }
 
-    /* Right sidebar. Kept: Likes (.likesModule), Listening history (.historyModule).
-       Hidden: Artist Studio/Artist tools/"Unlock…" (embedded iframe), New tracks,
-       Artists you should follow, mobile app ads, footer links. */
+    /* Right sidebar. Kept only where needed; dropped on Home, Profiles, Tags, and Listen/Set pages
+       so content uses the full window width without duplicating the native left sidebar. */
     .sidebarModule:has(> .sidebarModule__webiEmbeddedModule),
     .sidebarModule.artistShortcutsModule,
     .sidebarModule.whoToFollowModule,
@@ -32,10 +37,15 @@ enum Injected {
     .footerModule
     { display: none !important; }
 
-    /* Home: drop the right column entirely (Likes / Listening history duplicate the native
-       sidebar's Likes and History) and let the feed use the full width. Other pages keep theirs. */
-    .l-fluid-fixed:has(.modular-home-mixed-selection) > .l-sidebar-right { display: none !important; }
-    .l-fluid-fixed:has(.modular-home-mixed-selection) > .l-main {
+    .l-fluid-fixed:has(.modular-home-mixed-selection, .l-user-main, .tagsMain, .l-listen-wrapper, .systemPlaylistTrackList, .listenDetails) > .l-sidebar-right,
+    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .listenDetails, .l-hero-banner) .l-sidebar-right,
+    .l-sidebar-right:has(.listenNetworkSidebar),
+    .l-user-sidebar-right,
+    .l-listen--main > .l-sidebar-right
+    { display: none !important; }
+    .l-fluid-fixed:has(.modular-home-mixed-selection, .l-user-main, .tagsMain, .l-listen-wrapper, .systemPlaylistTrackList, .listenDetails) > .l-main,
+    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .listenDetails, .l-hero-banner) .l-main,
+    .l-listen--main > .l-main {
       width: auto !important; max-width: none !important; float: none !important;
       margin-right: 0 !important; padding-right: 0 !important; border-right: 0 !important;
     }
@@ -251,6 +261,71 @@ enum Injected {
             if (/Privacy/.test(t) && /Cookie/.test(t) && /Imprint/.test(t)) { ul.dataset.cpLegal = '1'; ul.style.setProperty('display', 'none', 'important'); }
           }
         };
+        // Track page cleanup: hide gamified Fans leaderboard & Message button, fix Details fade gradient,
+        // and soften dark right-rail card surfaces.
+        // Elements already inspected (computed-style checks are costly and this runs per mutation frame).
+        const tidyChecked = new WeakSet();
+        const FADE_SKIP = 'section[aria-label="Track header"], .MuiAvatar-root, .MuiChip-root, button, a, [role="button"], img, [class*="artwork" i], [class*="badge" i], [class*="skeleton" i]';
+        const tidyTrackFrame = () => {
+          const aside = document.querySelector('aside');
+          if (aside) {
+            const isFansText = (t) => t === 'Fans' || t === 'Climb the leaderboard' || t.startsWith('Fans who have played this track');
+            // True when el holds another rail module's heading (Likes, Reposts, …), so it isn't the Fans module alone.
+            const hasOtherModule = (el) => [...el.querySelectorAll('h2, h3')].some((x) => !isFansText((x.textContent || '').trim()));
+            for (const h of aside.querySelectorAll('h2, h3, [class*="MuiTypography-"]')) {
+              const txt = (h.textContent || '').trim();
+              if (isFansText(txt)) {
+                let mod = h;
+                while (mod.parentElement && mod.parentElement !== aside && !hasOtherModule(mod.parentElement)) mod = mod.parentElement;
+                if (mod !== h && !hasOtherModule(mod) && !/Related Tracks|In Playlists|In Albums/i.test(mod.textContent || '')) {
+                  mod.style.setProperty('display', 'none', 'important');
+                }
+              }
+            }
+            for (const b of aside.querySelectorAll('button, a[role="button"]')) {
+              const lbl = (b.getAttribute('aria-label') || b.textContent || '').trim();
+              if (/^(message|send a message)$/i.test(lbl)) {
+                b.style.setProperty('display', 'none', 'important');
+              }
+            }
+            for (const div of aside.querySelectorAll('div, section, article, a')) {
+              if (tidyChecked.has(div)) continue;
+              tidyChecked.add(div);
+              if (div.classList.contains('cp-rail-card') || div.matches('button, [role="button"], .MuiAvatar-root, .MuiChip-root')) continue;
+              const cs = getComputedStyle(div);
+              const bg = cs.backgroundColor || '';
+              if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+                const r = div.getBoundingClientRect();
+                if (!r.width) { tidyChecked.delete(div); continue; } // not laid out yet: retry next pass
+                if (r.width >= 70 && r.width <= 380 && r.height >= 44 && r.height <= 260) {
+                  div.classList.add('cp-rail-card');
+                }
+              }
+            }
+          }
+          const mainEl = document.getElementById('main') || document.querySelector('main');
+          if (mainEl) {
+            for (const el of mainEl.querySelectorAll('div, p, section, span')) {
+              if (tidyChecked.has(el)) continue;
+              tidyChecked.add(el);
+              if (el.closest(FADE_SKIP)) continue;
+              const cs = getComputedStyle(el);
+              // Only the "Show more" fade: an empty, absolutely positioned overlay (not artwork
+              // placeholders, badges or buttons that also use gradients).
+              if (cs.backgroundImage && cs.backgroundImage.includes('linear-gradient') &&
+                  cs.position === 'absolute' && !el.firstElementChild && !(el.textContent || '').trim()) {
+                el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(var(--cp-bg-rgb), 0), var(--cp-bg))', 'important');
+                el.style.setProperty('background-color', 'transparent', 'important');
+              }
+              const afterBg = getComputedStyle(el, '::after').backgroundImage || '';
+              const beforeBg = getComputedStyle(el, '::before').backgroundImage || '';
+              if (afterBg.includes('gradient') || beforeBg.includes('gradient')) {
+                el.classList.add('cp-fade-mask');
+              }
+            }
+          }
+          if (st.parentElement && st.nextElementSibling) st.parentElement.appendChild(st);
+        };
         // Forward track-page toasts (MUI Snackbars / alerts / fixed toast cards) to the native sidebar toast.
         const TOAST_RE = /\\b(was|were) (saved to|removed from|added to)\\b|\\b(added to|removed from|saved to)\\b|\\bnext up\\b|copied|\\breposted\\b|\\bunreposted\\b|\\bnow following\\b|\\bunfollowed\\b|\\bplaylist (created|updated|deleted)\\b|\\bcomment (posted|deleted)\\b/i;
         const TOAST_IGNORE = /sorry,?\\s*something went wrong/i;
@@ -271,7 +346,9 @@ enum Injected {
           }
         };
         let queued = false;
-        new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; tag(); hideLegal(); tagFrameToasts(); }); } })
+        const runFramePass = () => { tag(); hideLegal(); tidyTrackFrame(); tagFrameToasts(); };
+        document.addEventListener('DOMContentLoaded', runFramePass);
+        new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; runFramePass(); }); } })
           .observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['src'] });
         \(Menus.js)
         })();
@@ -457,8 +534,18 @@ enum Injected {
       if (p === '/you/albums') return 'albums';
       if (p === '/you/stations') return 'stations';
       if (p === '/you/following') return 'following';
+      if (p === '/search/people') return 'search-people';
       if (p.startsWith('/search')) return 'search';
-      if (sec && sec.closest('.userMain, .userNetwork')) return 'profile';
+      if (p.startsWith('/tags/')) return p.endsWith('/playlists') ? 'tags-playlists' : 'tags';
+      if (sec && sec.closest('.listenNetwork')) {
+        return /\/(likes|reposts)$/.test(p) ? 'listen-net-badges' : 'listen-net-sounds';
+      }
+      if (sec && sec.closest('.userNetwork')) {
+        return /\/(following|followers)$/.test(p) ? 'user-net-people' : 'user-net-likes';
+      }
+      if (sec && sec.closest('.userMain')) {
+        return /\/(albums|sets)$/.test(p) ? 'profile-collections' : 'profile-sounds';
+      }
       return 'default';
     };
     const readViewPref = (key, allowed, def) => {
@@ -609,41 +696,106 @@ enum Injected {
         ensureSyntheticToggle(plays, top, null, 'history', VIEW_MODES, 'compact');
       }
 
-      // 3. Search pages with track / playlist / album results.
+      // 3. Search pages with track / playlist / album / people results.
       const search = document.querySelector('.l-search');
       if (search) {
         const bar = search.querySelector('.searchOptions__container');
         const hasSounds = !!search.querySelector('.searchList__item .sound');
-        if (bar && hasSounds) {
+        const hasPeople = !hasSounds && !!search.querySelector('.searchList__item .userItem');
+        if (bar && (hasSounds || hasPeople)) {
           const insertBefore = bar.querySelector(':scope > .cp-play-all') || bar.querySelector(':scope > .searchTags');
-          ensureSyntheticToggle(search, bar, insertBefore, 'search', VIEW_MODES, 'compact');
+          const allowed = hasSounds ? VIEW_MODES : ['tiles', 'compact'];
+          ensureSyntheticToggle(search, bar, insertBefore, viewKeyFor(search), allowed, 'compact');
         } else if (bar) {
           const old = bar.querySelector(':scope > .cp-view-toggle-wrap');
           if (old) old.remove();
         }
       }
 
-      // 4. User profile pages (tracks, playlists, albums, reposts, likes, following, followers).
-      for (const sec of document.querySelectorAll('.userMain, .userNetwork')) {
-        if (sec.closest('.l-collection, .l-search')) continue;
-        const hasSounds = !!sec.querySelector('.soundList, .soundList__item');
-        const hasBadges = !hasSounds && !!sec.querySelector('.badgeList__item');
-        if (!hasSounds && !hasBadges) continue;
-        const allowed = hasSounds ? VIEW_MODES : ['tiles', 'compact'];
-        const def = hasSounds ? 'compact' : 'tiles';
-        const hostParent = sec.querySelector('.userMain__content, .userNetwork__content') || sec;
-        let bar = hostParent.querySelector(':scope > .cp-profile-view-bar');
-        if (!bar) {
-          bar = document.createElement('div');
-          bar.className = 'cp-profile-view-bar';
-          hostParent.insertBefore(bar, hostParent.firstChild);
+      // 3b. Tag / genre pages (/tags/<tag>, /tags/<tag>/popular-tracks, /tags/<tag>/playlists).
+      const tagsMain = document.querySelector('.tagsMain');
+      if (tagsMain) {
+        const gTabs = tagsMain.querySelector('.tabs .g-tabs, .g-tabs');
+        const hasSounds = !!tagsMain.querySelector('.soundList, .soundList__item, .tagsList__item .sound, .sound');
+        const hasBadges = !hasSounds && !!tagsMain.querySelector('.badgeList__item');
+        if (gTabs && (hasSounds || hasBadges)) {
+          const allowed = hasSounds ? VIEW_MODES : ['tiles', 'compact'];
+          ensureSyntheticToggle(tagsMain, gTabs, null, viewKeyFor(tagsMain), allowed, 'compact');
+        } else {
+          if (gTabs) {
+            const old = gTabs.querySelector(':scope > .cp-view-toggle-wrap');
+            if (old) old.remove();
+          }
+          applyViewMode(tagsMain, 'compact', null);
         }
-        ensureSyntheticToggle(sec, bar, null, 'profile', allowed, def);
       }
 
-      // 5. Fallback: any remaining .soundList not inside a tagged container stays compact.
+      // 4. User profile pages: force compact on overview, mount toggle inside .cp-profile-subhead on sub-pages.
+      for (const sec of document.querySelectorAll('.userMain')) {
+        if (sec.closest('.l-collection, .l-search')) continue;
+        for (const oldBar of sec.querySelectorAll('.cp-profile-view-bar')) oldBar.remove();
+        const subhead = sec.querySelector('.cp-profile-subhead');
+        if (!subhead) {
+          for (const w of sec.querySelectorAll('.cp-view-toggle-wrap')) w.remove();
+          applyViewMode(sec, 'compact', null);
+          const stream = sec.querySelector('.userStream');
+          if (stream) applyViewMode(stream, 'compact', null);
+          continue;
+        }
+        const hasSounds = !!sec.querySelector('.soundList, .soundList__item');
+        const hasBadges = !hasSounds && !!sec.querySelector('.badgeList__item');
+        if (!hasSounds && !hasBadges) {
+          const old = subhead.querySelector(':scope > .cp-view-toggle-wrap');
+          if (old) old.remove();
+          continue;
+        }
+        const isCol = /\/(albums|sets)\/?$/.test(location.pathname);
+        const allowed = isCol ? ['tiles', 'compact'] : (hasSounds ? VIEW_MODES : ['tiles', 'compact']);
+        const def = isCol ? 'tiles' : (hasSounds ? 'compact' : 'tiles');
+        ensureSyntheticToggle(sec, subhead, null, viewKeyFor(sec), allowed, def);
+      }
+
+      // 4b. User & Track/Playlist network engagement sub-pages (.userNetwork, .listenNetwork).
+      for (const sec of document.querySelectorAll('.userNetwork, .listenNetwork')) {
+        if (sec.closest('.l-collection, .l-search')) continue;
+        for (const oldBar of sec.querySelectorAll('.cp-profile-view-bar')) oldBar.remove();
+        const col = sec.closest('.l-fixed-top-one-column') || sec;
+        const subhead = col.querySelector('.cp-profile-subhead');
+        if (!subhead) continue;
+        const hasSounds = !!sec.querySelector('.soundList, .soundList__item');
+        const hasBadges = !hasSounds && !!sec.querySelector('.badgeList__item');
+        if (!hasSounds && !hasBadges) {
+          const old = subhead.querySelector(':scope > .cp-view-toggle-wrap');
+          if (old) old.remove();
+          continue;
+        }
+        const isLikes = /\/likes\/?$/.test(location.pathname) && sec.classList.contains('userNetwork');
+        const allowed = hasSounds ? VIEW_MODES : ['tiles', 'compact'];
+        const def = (hasSounds || isLikes) ? 'compact' : 'tiles';
+        ensureSyntheticToggle(sec, subhead, null, viewKeyFor(sec), allowed, def);
+      }
+
+      // 5. Fallback: any remaining .soundList (and /messages conversations) stays compact.
       for (const list of document.querySelectorAll('.soundList')) {
         if (!list.closest('[data-cp-view]')) list.classList.add('cp-view-compact');
+      }
+      // Messages: the compact rules need an ancestor of .conversation, so tag the messages list
+      // container (only on /messages, and untag on leaving, as containers can outlive navigation).
+      const onMessages = /^\/messages(\/|$)/.test(location.pathname);
+      for (const el of document.querySelectorAll('[data-cp-msg-compact]')) {
+        if (onMessages) continue;
+        el.classList.remove('cp-view-compact');
+        delete el.dataset.cpMsgCompact;
+      }
+      if (onMessages) {
+        for (const conv of document.querySelectorAll('.l-messages, .inbox, .conversation')) {
+          const host = conv.matches('.conversation') ? (conv.closest('.l-messages, .inbox') || conv.parentElement || conv) : conv;
+          for (const el of new Set([host, conv])) {
+            if (el.dataset.cpMsgCompact) continue;
+            el.dataset.cpMsgCompact = '1';
+            el.classList.add('cp-view-compact');
+          }
+        }
       }
     };
     // Toasts ("… was saved to your Library", "Added to Next up", etc.): intercept every
@@ -711,6 +863,15 @@ enum Injected {
         fix();
         new MutationObserver(fix).observe(el, { attributes: true, attributeFilter: ['style'] });
       }
+      // Details line: child elements (links, badges) are kept and joined with " · " in CSS
+      // (Theme.nativeCSS). Only a plain multi-line text node is rewritten, and only once it has text.
+      for (const det of document.querySelectorAll('.l-search .userItem__details:not([data-cp-tidy])')) {
+        if (det.firstElementChild) continue;
+        const text = det.textContent || '';
+        if (!text.trim()) continue;
+        det.dataset.cpTidy = '1';
+        det.textContent = text.split('\n').map((s) => s.trim()).filter(Boolean).join(' · ');
+      }
     };
     // Playlist / album / station pages: move the action buttons (like, repost, share…) from
     // below the hero into it, next to the track count, as on track pages. The row lives in
@@ -744,10 +905,18 @@ enum Injected {
       document.body.appendChild(svg);
     };
     const heroLook = () => {
-      const hero = document.querySelector('.l-listen-hero .fullHero');
+      const hero = document.querySelector(':is(.l-listen-hero, .l-hero-banner) .fullHero');
       if (!hero) return;
       heroWaveFilters();
-      const u = bgURL(hero.querySelector('.fullHero__artwork span.sc-artwork'));
+      let u = '';
+      for (const el of hero.querySelectorAll('.fullHero__artwork span.sc-artwork, .fullHero__artwork .image span, .fullHero__artwork .sc-artwork, .fullHero__artwork span')) {
+        u = bgURL(el);
+        if (u) break;
+      }
+      if (!u) {
+        const img = hero.querySelector('.fullHero__artwork img');
+        if (img) u = img.currentSrc || img.src || '';
+      }
       if (u) {
         const art = bigArt(u);
         if (hero.dataset.cpArt !== art) { hero.dataset.cpArt = art; hero.style.setProperty('--cp-art', 'url("' + art + '")'); }
@@ -943,6 +1112,40 @@ enum Injected {
       sec.appendChild(shelf);
       return sec;
     };
+    const makeArtistShelfSection = (title, items) => {
+      const sec = document.createElement('section');
+      sec.className = 'cp-section';
+      const head = document.createElement('div');
+      head.className = 'cp-section__header';
+      const h = document.createElement('h2');
+      h.className = 'cp-section__headingText';
+      h.textContent = title;
+      head.appendChild(h);
+      sec.appendChild(head);
+      const shelf = document.createElement('div');
+      shelf.className = 'cp-artist-shelf';
+      for (const it of (items || []).slice(0, 14)) {
+        const uObj = it && (it.user || it);
+        const name = uObj && (uObj.username || uObj.title);
+        const path = toPath(uObj && (uObj.permalink_url || uObj.href));
+        if (!name || !path) continue;
+        const card = makeNavLink(path, 'cp-artist-card', '');
+        const av = document.createElement('div');
+        av.className = 'cp-artist-card__avatar';
+        const raw = (uObj.avatar_url || uObj.artwork_url || '');
+        const u = raw ? raw.replace(/-(large|t\d+x\d+|badge|small|tiny|crop)\./, '-t300x300.') : '';
+        if (u) av.style.backgroundImage = 'url("' + u + '")';
+        const lbl = document.createElement('div');
+        lbl.className = 'cp-artist-card__name';
+        lbl.textContent = name;
+        card.appendChild(av);
+        card.appendChild(lbl);
+        shelf.appendChild(card);
+      }
+      if (!shelf.childElementCount) return null;
+      sec.appendChild(shelf);
+      return sec;
+    };
     const renderProfileSections = (box, basePath, tabs, data) => {
       box.innerHTML = '';
       box.dataset.cpRendered = basePath + ':' + (data ? 'data' : 'fallback');
@@ -979,9 +1182,10 @@ enum Injected {
         for (let i = 0; !cid && i < 15; i++) { await sleep(200); cid = findClientId(); }
         if (!cid) { profileCache.set(basePath, null); profileView(); return; }
         let uid = findProfileUserId(basePath);
+        let userObj = null;
         if (!uid) {
           const r = await origFetch(`https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent('https://soundcloud.com' + basePath)}&client_id=${encodeURIComponent(cid)}`);
-          if (r.ok) { const j = await r.json(); if (j && j.id) uid = String(j.id); }
+          if (r.ok) { const j = await r.json(); if (j && j.id) { uid = String(j.id); userObj = j; } }
         }
         if (!uid) { profileCache.set(basePath, null); profileView(); return; }
         const getCol = async (ep) => {
@@ -989,16 +1193,29 @@ enum Injected {
             const r = await origFetch(`https://api-v2.soundcloud.com/${ep}?client_id=${encodeURIComponent(cid)}&limit=12`);
             if (!r.ok) return [];
             const j = await r.json();
-            return Array.isArray(j && j.collection) ? j.collection : [];
+            return Array.isArray(j && j.collection) ? j.collection : (Array.isArray(j) ? j : []);
           } catch (e) { return []; }
         };
-        const [popular, albums, playlists, reposts] = await Promise.all([
+        const getJson = async (ep) => {
+          try {
+            const r = await origFetch(`https://api-v2.soundcloud.com/${ep}?client_id=${encodeURIComponent(cid)}`);
+            return r.ok ? await r.json() : null;
+          } catch (e) { return null; }
+        };
+        const [popular, albums, playlists, reposts, related, fetchedUser, webProfiles] = await Promise.all([
           tabs['popular-tracks'] ? getCol(`users/${uid}/toptracks`) : [],
           tabs['albums'] ? getCol(`users/${uid}/albums`) : [],
           tabs['sets'] ? getCol(`users/${uid}/playlists_without_albums`) : [],
           tabs['reposts'] ? getCol(`stream/users/${uid}/reposts`) : [],
+          getCol(`users/${uid}/relatedartists`),
+          userObj ? Promise.resolve(userObj) : getJson(`users/${uid}`),
+          getJson(`users/soundcloud:users:${uid}/web-profiles`),
         ]);
-        profileCache.set(basePath, { popular, albums, playlists, reposts });
+        profileCache.set(basePath, {
+          popular, albums, playlists, reposts, related,
+          user: fetchedUser || userObj || null,
+          webProfiles: Array.isArray(webProfiles) ? webProfiles : [],
+        });
         profileView();
       } catch (e) {
         profileCache.set(basePath, null);
@@ -1006,6 +1223,146 @@ enum Injected {
       } finally {
         profileInflight.delete(basePath);
       }
+    };
+    const syncProfileHeroMeta = (hero, basePath) => {
+      const infoContent = hero.querySelector('.profileHeaderInfo__content') || hero.querySelector('.profileHeaderInfo');
+      if (!infoContent) return;
+      const cached = profileCache.get(basePath);
+      const u = cached && cached.user;
+
+      let followersTxt = '', followingTxt = '', likesTxt = '';
+      for (const a of document.querySelectorAll('.infoStats__statLink, .infoStats a[href]')) {
+        const h = normHref(a.getAttribute('href'));
+        const valEl = a.querySelector('.infoStats__value');
+        const val = (valEl ? valEl.textContent : '').trim();
+        if (h === basePath + '/followers' && val) followersTxt = `${val} Followers`;
+        else if (h === basePath + '/following' && val) followingTxt = `${val} Following`;
+      }
+      const likesHdr = document.querySelector('.likesModule a.sidebarHeader .sidebarHeader__actualTitle');
+      if (likesHdr) {
+        const m = (likesHdr.textContent || '').trim().match(/^([\d.,KMB]+)\s+likes?/i);
+        if (m) likesTxt = `${m[1]} Likes`;
+      }
+      if (!followersTxt && u && typeof u.followers_count === 'number') followersTxt = `${fmtPlays(u.followers_count) || '0'} Followers`;
+      if (!followingTxt && u && typeof u.followings_count === 'number') followingTxt = `${fmtPlays(u.followings_count) || '0'} Following`;
+      if (!likesTxt && u && typeof u.likes_count === 'number' && u.likes_count > 0) likesTxt = `${fmtPlays(u.likes_count)} Likes`;
+
+      const fLabel = followersTxt || 'Followers';
+      const gLabel = followingTxt || 'Following';
+      const lLabel = likesTxt || 'Likes';
+      const sig = `${basePath}|${fLabel}|${gLabel}|${lLabel}`;
+      let row = infoContent.querySelector(':scope > .cp-profile-meta-links');
+      if (row && row.dataset.cpSig === sig) return;
+      if (row) row.remove();
+      row = document.createElement('div');
+      row.className = 'cp-profile-meta-links';
+      row.dataset.cpSig = sig;
+      row.appendChild(makeNavLink(basePath + '/followers', 'cp-profile-meta-link', fLabel));
+      row.appendChild(makeNavLink(basePath + '/following', 'cp-profile-meta-link', gLabel));
+      row.appendChild(makeNavLink(basePath + '/likes', 'cp-profile-meta-link', lLabel));
+      infoContent.appendChild(row);
+    };
+    const syncProfileAbout = (mainContent, basePath, isOverview) => {
+      if (!isOverview) {
+        for (const a of mainContent.querySelectorAll(':scope > .cp-profile-about')) a.remove();
+        return;
+      }
+      const cached = profileCache.get(basePath);
+      let bio = (cached && cached.user && cached.user.description) ? String(cached.user.description).trim() : '';
+      if (!bio) {
+        const domBio = document.querySelector('.l-sidebar-right .truncatedUserDescription__content, .userSidebar .truncatedUserDescription__content');
+        if (domBio) bio = (domBio.textContent || '').trim();
+      }
+      const links = [];
+      const seenUrls = new Set();
+      if (cached && Array.isArray(cached.webProfiles)) {
+        for (const wp of cached.webProfiles) {
+          if (!wp || !wp.url || seenUrls.has(wp.url)) continue;
+          seenUrls.add(wp.url);
+          links.push({ title: (wp.title || wp.service || 'Website').trim(), url: wp.url });
+        }
+      }
+      if (!links.length) {
+        for (const a of document.querySelectorAll('.web-profiles a[href], .userSidebar a.web-profile[href]')) {
+          const url = a.href;
+          const title = (a.textContent || '').trim();
+          if (!url || !title || seenUrls.has(url)) continue;
+          seenUrls.add(url);
+          links.push({ title, url });
+        }
+      }
+      if (!bio && !links.length) {
+        for (const a of mainContent.querySelectorAll(':scope > .cp-profile-about')) a.remove();
+        return;
+      }
+      const sig = `${basePath}|${bio.slice(0, 80)}|${links.length}`;
+      let about = mainContent.querySelector(':scope > .cp-profile-about');
+      if (about && about.dataset.cpSig === sig) return;
+      if (about) about.remove();
+      about = document.createElement('section');
+      about.className = 'cp-profile-about';
+      about.dataset.cpSig = sig;
+      const h = document.createElement('h2');
+      h.className = 'cp-section__headingText';
+      h.textContent = 'About';
+      about.appendChild(h);
+      const card = document.createElement('div');
+      card.className = 'cp-profile-about__card';
+      if (bio) {
+        const p = document.createElement('p');
+        p.className = 'cp-profile-about__bio';
+        p.textContent = bio;
+        card.appendChild(p);
+      }
+      if (links.length) {
+        const pills = document.createElement('div');
+        pills.className = 'cp-profile-about__links';
+        for (const l of links.slice(0, 10)) {
+          const a = document.createElement('a');
+          a.className = 'cp-profile-about__link';
+          a.href = l.url;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = l.title;
+          pills.appendChild(a);
+        }
+        card.appendChild(pills);
+      }
+      about.appendChild(card);
+      const rel = mainContent.querySelector(':scope > .cp-profile-related');
+      if (rel) mainContent.insertBefore(about, rel);
+      else mainContent.appendChild(about);
+    };
+    const syncProfileRelated = (mainContent, basePath, isOverview) => {
+      if (!isOverview) {
+        for (const r of mainContent.querySelectorAll(':scope > .cp-profile-related')) r.remove();
+        return;
+      }
+      const cached = profileCache.get(basePath);
+      let related = (cached && Array.isArray(cached.related) && cached.related.length) ? cached.related : [];
+      if (!related.length) {
+        related = [...document.querySelectorAll('.relatedArtistsModule a.userBadgeListItem__heading[href], .relatedArtistsModule .userBadgeListItem')]
+          .map((el) => {
+            const a = el.matches('a') ? el : el.querySelector('a[href]');
+            const art = bgURL(el.closest('li, .userBadgeListItem')?.querySelector('.sc-artwork, .image span'));
+            return a ? { username: (a.textContent || '').trim(), permalink_url: a.getAttribute('href'), avatar_url: art } : null;
+          }).filter(Boolean);
+        if (cached && related.length) cached.related = related;
+      }
+      if (!related.length) {
+        for (const r of mainContent.querySelectorAll(':scope > .cp-profile-related')) r.remove();
+        return;
+      }
+      const firstRef = (related[0] && ((related[0].user || related[0]).permalink_url || (related[0].user || related[0]).href)) || '';
+      const sig = `${basePath}|${related.length}|${firstRef}`;
+      const existing = mainContent.querySelector(':scope > .cp-profile-related');
+      if (existing && existing.dataset.cpSig === sig) return;
+      if (existing) existing.remove();
+      const relEl = makeArtistShelfSection('Similar Artists', related);
+      if (!relEl) return;
+      relEl.classList.add('cp-profile-related');
+      relEl.dataset.cpSig = sig;
+      mainContent.appendChild(relEl);
     };
     const profileView = () => {
       const hero = document.querySelector('.l-user-hero .profileHeader');
@@ -1017,13 +1374,16 @@ enum Injected {
       const basePath = normHref(tabLinks[0].getAttribute('href'));
       if (!basePath) return;
 
+      const baseLower = basePath.toLowerCase();
       const tabs = {};
       for (const a of tabLinks) {
         const h = normHref(a.getAttribute('href'));
-        if (h.startsWith(basePath + '/')) tabs[h.slice(basePath.length + 1)] = h;
+        if (h.toLowerCase().startsWith(baseLower + '/')) {
+          tabs[h.slice(basePath.length + 1).toLowerCase()] = h;
+        }
       }
 
-      // Move action buttons (Station, Follow, Share, Message, More) into the profile hero card.
+      // Move action buttons (Station, Follow, Share, More) into the profile hero card; hide Insights & DM buttons.
       const freshBtns = infoBar.querySelector('.userInfoBar__buttons:not(.cp-profile-actions)');
       if (freshBtns) {
         for (const old of hero.querySelectorAll(':scope > .cp-profile-actions')) old.remove();
@@ -1034,20 +1394,34 @@ enum Injected {
       } else if (profileBtnsMoved && !profileBtnsMoved.isConnected && profileBtnsBase === basePath) {
         hero.appendChild(profileBtnsMoved);
       }
+      for (const b of hero.querySelectorAll('.cp-profile-actions button, .cp-profile-actions a')) {
+        const lbl = (b.getAttribute('aria-label') || b.getAttribute('title') || b.textContent || '').replace(/\s+/g, ' ').trim();
+        if (/\binsights\b/i.test(lbl) || /^(send a message|message)$/i.test(lbl) || b.classList.contains('sc-button-insights') || (b.getAttribute('href') || '').includes('/insights')) {
+          b.style.setProperty('display', 'none', 'important');
+        }
+      }
+
+      syncProfileHeroMeta(hero, basePath);
 
       const mainContent = document.querySelector('.l-user-main .userMain__content');
       if (!mainContent) return;
 
       const cur = normHref(location.pathname);
-      const subKey = cur.startsWith(basePath + '/') ? cur.slice(basePath.length + 1) : '';
+      const curLower = cur.toLowerCase();
+      const subKey = curLower.startsWith(baseLower + '/') ? curLower.slice(baseLower.length + 1) : '';
       const subTitle = PROFILE_SECTIONS[subKey] || '';
 
       if (subTitle) {
+        mainContent.classList.remove('cp-profile-overview');
+        delete mainContent.dataset.cpTrimmed;
+        for (const el of mainContent.querySelectorAll('.cp-trimmed-extra')) el.classList.remove('cp-trimmed-extra');
         for (const s of mainContent.querySelectorAll(':scope > .cp-profile-sections, .userStream > .cp-profile-sections')) s.remove();
+        syncProfileAbout(mainContent, basePath, false);
+        syncProfileRelated(mainContent, basePath, false);
         const nameEl = hero.querySelector('.profileHeaderInfo__userName');
         const artistName = (nameEl ? (nameEl.childNodes[0] && nameEl.childNodes[0].textContent || nameEl.textContent) : '').trim() || 'Artist';
         let subhead = mainContent.querySelector(':scope > .cp-profile-subhead');
-        const key = basePath + '|' + subKey;
+        const key = baseLower + '|' + subKey;
         if (!subhead || subhead.dataset.cpKey !== key) {
           if (subhead) subhead.remove();
           subhead = document.createElement('div');
@@ -1070,22 +1444,42 @@ enum Injected {
 
       // Overview page (/<user>)
       for (const sh of mainContent.querySelectorAll(':scope > .cp-profile-subhead')) sh.remove();
-      if (cur !== basePath) return;
+      if (curLower !== baseLower) {
+        mainContent.classList.remove('cp-profile-overview');
+        delete mainContent.dataset.cpTrimmed;
+        for (const el of mainContent.querySelectorAll('.cp-trimmed-extra')) el.classList.remove('cp-trimmed-extra');
+        syncProfileAbout(mainContent, basePath, false);
+        syncProfileRelated(mainContent, basePath, false);
+        return;
+      }
+      mainContent.classList.add('cp-profile-overview');
 
-      // Turn "Recent" header into an Apple Music section header linking to Tracks.
+      // Turn "Recent" header into an Apple Music section header linking to Tracks (with fallback to other tabs).
       const recentH = mainContent.querySelector('.userstream__header');
-      if (recentH && tabs['tracks'] && recentH.dataset.cpEnhanced !== basePath) {
-        recentH.dataset.cpEnhanced = basePath;
+      const recentHref = tabs['tracks'] || tabs['sets'] || tabs['albums'] || tabs['reposts'] || '';
+      const recentEnhKey = baseLower + '|' + recentHref;
+      if (recentH && recentHref && recentH.dataset.cpEnhanced !== recentEnhKey) {
+        const label = recentH.dataset.cpOrigLabel || (recentH.textContent || 'Recent').trim() || 'Recent';
+        recentH.dataset.cpOrigLabel = label;
+        recentH.dataset.cpEnhanced = recentEnhKey;
         recentH.classList.add('cp-section-heading');
-        const label = (recentH.textContent || 'Recent').trim();
         recentH.textContent = '';
-        const titleLink = makeNavLink(tabs['tracks'], 'cp-section__title', '');
+        const titleLink = makeNavLink(recentHref, 'cp-section__title', '');
         titleLink.appendChild(document.createTextNode(label));
         titleLink.insertAdjacentHTML('beforeend', CHEVRON_RIGHT_SVG);
-        const seeAll = makeNavLink(tabs['tracks'], 'cp-section__seeAll', 'See All');
+        const seeAll = makeNavLink(recentHref, 'cp-section__seeAll', 'See All');
         recentH.appendChild(titleLink);
         recentH.appendChild(seeAll);
       }
+
+      let shown = 0;
+      for (const li of mainContent.querySelectorAll('.soundList__item')) {
+        if (li.closest('.spotlight')) continue;
+        if (!li.querySelector('.sound')) continue;
+        shown++;
+        li.classList.toggle('cp-trimmed-extra', shown > 10);
+      }
+      mainContent.dataset.cpTrimmed = '1';
 
       const stream = mainContent.querySelector('.userStream');
       const host = stream || mainContent;
@@ -1101,9 +1495,126 @@ enum Injected {
       if (profileCache.has(basePath)) {
         const data = profileCache.get(basePath);
         const want = basePath + ':' + (data ? 'data' : 'fallback');
-        if (box.dataset.cpRendered !== want) renderProfileSections(box, basePath, tabs, data);
+        if (box.dataset.cpRendered !== want) {
+          renderProfileSections(box, basePath, tabs, data);
+          box.dataset.cpRendered = want;
+        }
       } else {
         loadProfileOverview(basePath, tabs);
+      }
+      syncProfileAbout(mainContent, basePath, true);
+      syncProfileRelated(mainContent, basePath, true);
+    };
+
+    // Network & Engagement drill-down sub-pages:
+    // - User network: /<user>/(likes|following|followers|comments)
+    // - Track/Set engagement: /<user>/<track>/(likes|reposts|albums|sets|recommended) and /<user>/sets/<set>/(likes|reposts)
+    const USER_NET_TITLES = { likes: 'Likes', following: 'Following', followers: 'Followers', comments: 'Comments' };
+    const LISTEN_NET_TITLES = {
+      likes: 'Liked By', reposts: 'Reposted By', albums: 'Appears On Albums',
+      sets: 'In Playlists', recommended: 'Related Tracks',
+    };
+    const networkView = () => {
+      if (location.pathname.startsWith('/you/') || document.querySelector('.l-collection')) return;
+      const cur = normHref(location.pathname);
+      const parts = cur.split('/').filter(Boolean);
+
+      // 1. User network pages
+      const userNet = document.querySelector('.userNetwork');
+      if (userNet && parts.length === 2 && USER_NET_TITLES[parts[1]]) {
+        const basePath = '/' + parts[0];
+        const subTitle = USER_NET_TITLES[parts[1]];
+        const rawH1 = (textOf('.userNetworkTop__title') || '').trim();
+        const artistName = rawH1.replace(/^(Likes|Following|Followers|Comments)\s+(?:by|of|from)\s+/i, '').trim() || parts[0];
+        let avatar = '';
+        for (const el of document.querySelectorAll('.userNetworkTop span.sc-artwork, .userNetworkTop .sc-artwork, .userNetworkTop .image span')) {
+          avatar = bgURL(el);
+          if (avatar) break;
+        }
+        const main = userNet.closest('.l-fixed-top-one-column')?.querySelector(':scope > .l-main') || userNet;
+        const key = `${cur}|${artistName}|${avatar ? '1' : '0'}`;
+        let subhead = main.querySelector(':scope > .cp-profile-subhead');
+        if (!subhead || subhead.dataset.cpKey !== key) {
+          if (subhead) subhead.remove();
+          subhead = document.createElement('div');
+          subhead.className = 'cp-profile-subhead';
+          subhead.dataset.cpKey = key;
+          const left = document.createElement('div');
+          left.className = 'cp-profile-subhead__left';
+          if (avatar) {
+            const av = document.createElement('span');
+            av.className = 'cp-profile-subhead__avatar';
+            av.style.backgroundImage = `url("${avatar}")`;
+            left.appendChild(av);
+          }
+          const back = makeNavLink(basePath, 'cp-profile-subhead__back', CHEVRON_LEFT_SVG);
+          back.appendChild(document.createTextNode(artistName));
+          const h = document.createElement('h2');
+          h.className = 'cp-profile-subhead__title';
+          h.textContent = subTitle;
+          left.appendChild(back);
+          left.appendChild(h);
+          subhead.appendChild(left);
+          main.insertBefore(subhead, main.firstChild);
+        }
+        return;
+      }
+
+      // 2. Track / Playlist engagement network pages
+      const listenNet = document.querySelector('.listenNetwork');
+      if (listenNet && parts.length >= 3) {
+        const subKey = parts[parts.length - 1];
+        const subTitle = LISTEN_NET_TITLES[subKey];
+        if (!subTitle) return;
+        const parentPath = '/' + parts.slice(0, -1).join('/');
+        const itemTitle = (textOf('.listenNetworkInfo__title') || parts[parts.length - 2] || 'Back').trim();
+        let art = '';
+        for (const el of document.querySelectorAll('.listenNetworkInfo span.sc-artwork, .listenNetworkInfo .sc-artwork, .listenNetworkInfo .image span')) {
+          art = bgURL(el);
+          if (art) break;
+        }
+        const main = listenNet.closest('.l-fixed-top-one-column')?.querySelector(':scope > .l-main') || listenNet;
+        const key = `${cur}|${itemTitle}|${art ? '1' : '0'}`;
+        let subhead = main.querySelector(':scope > .cp-profile-subhead');
+        if (!subhead || subhead.dataset.cpKey !== key) {
+          if (subhead) subhead.remove();
+          subhead = document.createElement('div');
+          subhead.className = 'cp-profile-subhead';
+          subhead.dataset.cpKey = key;
+          const left = document.createElement('div');
+          left.className = 'cp-profile-subhead__left';
+          if (art) {
+            const thumb = document.createElement('span');
+            thumb.className = 'cp-profile-subhead__art';
+            thumb.style.backgroundImage = `url("${art}")`;
+            left.appendChild(thumb);
+          }
+          const back = makeNavLink(parentPath, 'cp-profile-subhead__back', CHEVRON_LEFT_SVG);
+          const backSpan = document.createElement('span');
+          backSpan.className = 'cp-profile-subhead__backText';
+          backSpan.textContent = itemTitle;
+          back.appendChild(backSpan);
+          const h = document.createElement('h2');
+          h.className = 'cp-profile-subhead__title';
+          h.textContent = subTitle;
+          left.appendChild(back);
+          left.appendChild(h);
+          subhead.appendChild(left);
+          main.insertBefore(subhead, main.firstChild);
+        }
+      }
+    };
+
+    // Settings cleanup: hide web-only "Change theme" and "Cookies" sections cleanly by heading text.
+    const settingsView = () => {
+      for (const sec of document.querySelectorAll('.settingsMain .g-form-section:not([data-cp-settings-checked])')) {
+        const h = sec.querySelector(':scope > .g-form-section-head h3, :scope > div > .g-form-section-head h3');
+        if (!h) continue;
+        sec.dataset.cpSettingsChecked = '1';
+        const txt = (h.textContent || '').trim();
+        if (/^(change theme|cookies)$/i.test(txt)) {
+          sec.style.setProperty('display', 'none', 'important');
+        }
       }
     };
     // Horizontal tile streams (.tileGallery): enable native horizontal scrolling, lazy-hydrate
@@ -1488,16 +1999,19 @@ enum Injected {
       if (group.hidden) group.hidden = false;
     };
 
-    // The Feed tab is hidden; if something still lands on /feed, go Home instead.
-    const leaveFeed = () => { if (/^\/feed(\/|$)/.test(location.pathname)) location.replace('/discover'); };
+    // Hidden routes: /feed → Home, /settings/advertising → /settings.
+    const leaveFeed = () => {
+      if (/^\/feed(\/|$)/.test(location.pathname)) location.replace('/discover');
+      else if (/^\/settings\/advertising(\/|$)/.test(location.pathname)) location.replace('/settings');
+    };
     // Runs synchronously after each DOM change (before paint), so hidden sections never
     // render and their artwork is never requested.
     new MutationObserver((records) => {
-      hideSections(); leaveFeed(); applyThemeClass(); syncViewToggles(); unclipSearchOptions(); heroActions(); profileView(); setupTileGalleries(); syncSearchPlayAll(); syncLikesActions();
+      hideSections(); leaveFeed(); applyThemeClass(); profileView(); networkView(); settingsView(); syncViewToggles(); unclipSearchOptions(); heroActions(); setupTileGalleries(); syncSearchPlayAll(); syncLikesActions();
       for (const r of records) if (r.addedNodes.length) tagToasts(r.addedNodes);
     })
       .observe(document.documentElement, { childList: true, subtree: true });
-    window.addEventListener('popstate', () => { syncSearchPlayAll(); syncLikesActions(); syncViewToggles(); profileView(); });
+    window.addEventListener('popstate', () => { leaveFeed(); profileView(); networkView(); settingsView(); syncSearchPlayAll(); syncLikesActions(); syncViewToggles(); });
     leaveFeed();
 
     // Artwork: SoundCloud asks for 500×500 almost everywhere. Once an artwork element has a
@@ -1535,6 +2049,12 @@ enum Injected {
     // Native Liquid Glass hover play button over tiles (MainView floats a real NSGlassEffectView).
     let hoverTile = null;
     let hoverKey = '';
+    const setHoverTile = (next) => {
+      if (hoverTile === next) return;
+      if (hoverTile) hoverTile.classList.remove('cp-tile-hover');
+      hoverTile = next;
+      if (hoverTile) hoverTile.classList.add('cp-tile-hover');
+    };
     const postHoverPlay = (val) => {
       const k = val && typeof val === 'object' ? `${val.x},${val.y},${val.size},${val.playing}` : String(val);
       if (k === hoverKey) return;
@@ -1542,7 +2062,7 @@ enum Injected {
       try { window.webkit.messageHandlers.cp.postMessage({ hoverPlay: val }); } catch (e) {}
     };
     const clearHoverPlay = () => {
-      hoverTile = null;
+      setHoverTile(null);
       postHoverPlay(null);
     };
     const syncHoverPlay = (tile) => {
@@ -1555,7 +2075,7 @@ enum Injected {
         clearHoverPlay();
         return;
       }
-      hoverTile = tile;
+      setHoverTile(tile);
       const size = Math.round(Math.min(78, Math.max(58, r.width * 0.44)));
       const x = Math.round((r.left + r.width / 2) * 2) / 2;
       const y = Math.round((r.top + r.height / 2) * 2) / 2;
@@ -1637,6 +2157,14 @@ enum Injected {
         btn.click();
         setTimeout(() => { if (hoverTile) syncHoverPlay(hoverTile); }, 80);
         setTimeout(() => { if (hoverTile) syncHoverPlay(hoverTile); }, 250);
+      },
+      clearHoverTile() { clearHoverPlay(); },
+      // The pointer left the native play button: if it is back on the same tile, post again
+      // (postHoverPlay drops repeats, so a returning pointermove alone would send nothing).
+      resyncHoverTile() {
+        hoverKey = '';
+        if (hoverTile && hoverTile.isConnected && hoverTile.matches(':hover')) syncHoverPlay(hoverTile);
+        else clearHoverPlay();
       },
 
       setCustomCSS(css) { userStyle.textContent = css; mountStyles(); },

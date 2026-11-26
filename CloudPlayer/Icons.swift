@@ -12,6 +12,8 @@ enum Icons {
         (".sc-button-play.sc-button-pause", "pause.fill"),
         (".sc-button-like", "heart"),
         (".sc-button-like.sc-button-selected", "heart.fill"),
+        (".sc-button-follow", "person.badge.plus"),
+        (".sc-button-follow.sc-button-selected", "person.fill.checkmark"),
         (".sc-button-repost", "arrow.2.squarepath"),
         (".sc-button-share", "square.and.arrow.up"),
         (".sc-button-copylink", "link"),
@@ -84,7 +86,7 @@ enum Icons {
 
     /// A black-on-transparent PNG of the symbol, centred in a square canvas, as a data URL.
     private static func dataURL(_ name: String) -> String? {
-        let config = NSImage.SymbolConfiguration(pointSize: 48, weight: .medium)
+        let config = NSImage.SymbolConfiguration(pointSize: 48, weight: .semibold)
             .applying(NSImage.SymbolConfiguration(paletteColors: [.black]))
         guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(config) else { return nil }

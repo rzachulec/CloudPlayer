@@ -263,15 +263,15 @@ enum Menus {
     const HERO = '.l-listen-hero, .l-hero-banner, section[aria-label="Track header"]';
     const act = (t, s, fn) => ({ t, s, fn });
     const isCompactRow = (el) => !WEBI && !!el && !!el.closest('.cp-view-compact')
-      && (el.matches('.soundList__item, .searchList__item, .historicalPlays__item, .badgeList__item')
-        || !!el.closest('.soundList__item, .searchList__item, .historicalPlays__item, .badgeList__item'));
+      && (el.matches('.soundList__item, .searchList__item, .historicalPlays__item, .badgeList__item, .tagsList__item')
+        || !!el.closest('.soundList__item, .searchList__item, .historicalPlays__item, .badgeList__item, .tagsList__item'));
 
     // Playlist/set rows in SoundCloud's compact lists (e.g. Search) don't have a .sc-button-more
     // button — their actions (queue, repost, share, copy link, edit, delete) are inline buttons
     // that Theme.nativeCSS hides. Inject a synthetic ••• button so every row has Like + •••.
     const ensureRowMoreButtons = () => {
       if (WEBI) return;
-      for (const group of document.querySelectorAll(':is(.soundList__item, .searchList__item, .historicalPlays__item) .sound .soundActions .sc-button-group')) {
+      for (const group of document.querySelectorAll(':is(.soundList__item, .searchList__item, .historicalPlays__item, .tagsList__item, .conversation) .sound .soundActions .sc-button-group')) {
         if (group.querySelector('.sc-button-more') || !group.querySelector('.sc-button')) continue;
         const btn = document.createElement('button');
         btn.type = 'button';
