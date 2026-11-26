@@ -1,4 +1,5 @@
 import AppKit
+import MediaPlayer
 import SwiftUI
 
 @MainActor
@@ -26,10 +27,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         return true
     }
 
-    /// Closing a window only hides it: the web view keeps playing.
+    /// Closing the main window quits the app (which stops playback, see applicationShouldTerminate).
+    /// Other windows (the mini player) just hide.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        sender.orderOut(nil)
+        if sender === mainWindow {
+            NSApp.terminate(nil)
+        } else {
+            sender.orderOut(nil)
+        }
         return false
+    }
+
+    private var isTerminating = false
+
+    /// Quit cleanly: clear Now Playing, stop and release the audio stream, unload the page so
+    /// WebKit flushes storage, then exit. Capped at 2 s so quitting can never hang.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if isTerminating { return .terminateNow }
+        isTerminating = true
+
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = nil
+        center.playbackState = .stopped
+
+        var replied = false
+        let finish: @MainActor () -> Void = {
+            guard !replied else { return }
+            replied = true
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        player.shutdown(completion: finish)
+        runOnMainRunLoop(after: 2) { finish() }
+        return .terminateLater
     }
 
     // MARK: Windows

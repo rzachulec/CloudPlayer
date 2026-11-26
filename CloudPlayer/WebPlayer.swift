@@ -54,6 +54,14 @@ struct TrackState: Equatable {
 }
 
 /// Owns the SoundCloud web view (the audio engine) and exposes its state + controls.
+/// Runs `body` on the main run loop after `delay`, including while AppKit waits on a
+/// `.terminateLater` reply: it then spins the run loop in modal-panel mode, where
+/// `DispatchQueue.main` blocks don't run, so a plain asyncAfter would never fire.
+func runOnMainRunLoop(after delay: TimeInterval, _ body: @escaping @MainActor () -> Void) {
+    let timer = Timer(timeInterval: delay, repeats: false) { _ in MainActor.assumeIsolated { body() } }
+    for mode in [RunLoop.Mode.common, .modalPanel] { RunLoop.main.add(timer, forMode: mode) }
+}
+
 @MainActor
 final class WebPlayer: NSObject, ObservableObject {
     @Published private(set) var state = TrackState()
@@ -202,6 +210,28 @@ final class WebPlayer: NSObject, ObservableObject {
     func playPause() { cmd("toggle") }
     func play() { if !state.isPlaying { playPause() } }
     func pause() { if state.isPlaying { playPause() } }
+
+    /// Before quitting: stop playback, tear down the media element so the stream's network
+    /// connection and buffers are released, then unload the page so its pagehide/unload handlers
+    /// run and WebKit commits localStorage/cookies before the app exits.
+    func shutdown(completion: @escaping @MainActor () -> Void) {
+        let js = """
+        (() => {
+          const els = new Set(document.querySelectorAll('audio, video'));
+          if (window.CP && CP.media) els.add(CP.media);
+          for (const m of els) {
+            try { m.pause(); m.removeAttribute('src'); m.srcObject = null; m.load(); } catch (e) {}
+          }
+          return els.size;
+        })()
+        """
+        webView.evaluateJavaScript(js) { [weak self] _, _ in
+            guard let self else { completion(); return }
+            self.webView.stopLoading()
+            self.webView.load(URLRequest(url: URL(string: "about:blank")!))
+            runOnMainRunLoop(after: 0.4) { completion() }
+        }
+    }
     func next() {
         pendingSwipeDirection = (.next, Date())
         if isViewingNowPlaying { startImmediateSwipe(direction: .next) }
