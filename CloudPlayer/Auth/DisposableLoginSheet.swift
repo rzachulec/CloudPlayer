@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import OSLog
 import SwiftUI
 import WebKit
 
@@ -19,9 +20,11 @@ final class DisposableLoginController: NSObject {
     private var popups: [NSWindow] = []
     private var signInBusyWork: DispatchWorkItem?
     private var cookieCheckWork: DispatchWorkItem?
+    private var cookiePollTimer: Timer?
     private var capturedClientID = ""
     private var completed = false
     private var onAuthenticated: ((SoundCloudSession) -> Void)?
+    private let logger = Logger(subsystem: "local.cloudplayer", category: "DisposableLogin")
 
     func start(onAuthenticated: @escaping (SoundCloudSession) -> Void) {
         teardown()
@@ -59,6 +62,10 @@ final class DisposableLoginController: NSObject {
 
         config.websiteDataStore.httpCookieStore.add(self)
         self.webView = wv
+        cookiePollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.checkSessionCookies() }
+        }
+        logger.info("Starting disposable WebKit login")
         wv.load(URLRequest(url: URL(string: "https://soundcloud.com/")!))
     }
 
@@ -69,6 +76,8 @@ final class DisposableLoginController: NSObject {
 
     /// Completely tears down WebKit and releases every reference so WebContent/Networking processes terminate.
     func teardown() {
+        cookiePollTimer?.invalidate()
+        cookiePollTimer = nil
         cookieCheckWork?.cancel()
         cookieCheckWork = nil
         signInBusyWork?.cancel()
@@ -119,6 +128,7 @@ final class DisposableLoginController: NSObject {
         let refresh = scCookies.first(where: { $0.name == "oauth_refresh_token" })?.value
         completed = true
         isCapturing = true
+        logger.info("Captured SoundCloud session cookies (hasRefresh=\(refresh != nil), hasClientID=\(!self.capturedClientID.isEmpty)); tearing down WebKit")
 
         let session = SoundCloudSession(
             oauthToken: oauth,
@@ -199,6 +209,7 @@ extension DisposableLoginController: WKNavigationDelegate, WKUIDelegate {
         )
         let popup = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration)
         popup.uiDelegate = self
+        logger.info("Opening auth popup for host=\(host, privacy: .public)")
 
         let win = NSWindow(
             contentRect: popup.frame,
@@ -368,6 +379,7 @@ private extension DisposableLoginController {
         """
         return """
         (() => {
+          if (location.hostname !== 'soundcloud.com' && location.hostname !== 'www.soundcloud.com') return;
           if (window.__cpDisposableMain) return;
           window.__cpDisposableMain = true;
           window.CPAuthSignInBusy = false;
