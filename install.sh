@@ -1,13 +1,23 @@
 #!/bin/bash
-# Installs or updates CloudPlayer from the latest GitHub build:
+# Installs or updates CloudPlayer from GitHub Releases:
 #
 #   curl -fsSL https://raw.githubusercontent.com/rzachulec/CloudPlayer/main/install.sh | bash
+#
+# Install the rolling nightly (staging) build from main:
+#
+#   curl -fsSL https://raw.githubusercontent.com/rzachulec/CloudPlayer/main/install.sh | bash -s -- --nightly
 #
 # Picks the build for this Mac (Apple Silicon or Intel), quits a running CloudPlayer, replaces
 # it in /Applications, removes the quarantine flag (the build is self-signed, not notarized, see
 # the README) and launches it. Your SoundCloud sign-in lives in ~/Library, so it survives updates.
 #
+# Flags:
+#   --nightly                        install the rolling nightly build from main
+#   --version <tag>                  install a specific release tag (e.g. v0.2.0)
+#   -h, --help                       show usage
+#
 # Options (environment variables):
+#   CLOUDPLAYER_CHANNEL=nightly      same as --nightly (default: stable)
 #   CLOUDPLAYER_DIR=~/Applications   install somewhere else (default /Applications)
 #   CLOUDPLAYER_NO_LAUNCH=1          don't open the app afterwards
 #
@@ -19,10 +29,49 @@ main() {
   local repo="rzachulec/CloudPlayer"
   local dir="${CLOUDPLAYER_DIR:-/Applications}"
   local app="$dir/CloudPlayer.app"
+  local channel="${CLOUDPLAYER_CHANNEL:-stable}"
+  local version=""
 
   bold() { printf '\033[1m%s\033[0m\n' "$*"; }
   step() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
   fail() { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; exit 1; }
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --nightly)
+        channel="nightly"
+        shift
+        ;;
+      --version)
+        [ "$#" -ge 2 ] || fail "--version requires a release tag (e.g. v0.2.0)."
+        version="$2"
+        shift 2
+        ;;
+      --version=*)
+        version="${1#--version=}"
+        [ -n "$version" ] || fail "--version requires a release tag (e.g. v0.2.0)."
+        shift
+        ;;
+      -h|--help)
+        cat <<'USAGE'
+Usage: install.sh [--nightly | --version <tag>]
+
+  --nightly          Install the rolling nightly (staging) build from main
+  --version <tag>    Install a specific release tag (e.g. v0.2.0)
+  -h, --help         Show this help
+
+Environment variables:
+  CLOUDPLAYER_CHANNEL=nightly      Same as --nightly (default: stable)
+  CLOUDPLAYER_DIR=~/Applications   Install directory (default: /Applications)
+  CLOUDPLAYER_NO_LAUNCH=1          Don't launch the app after installing
+USAGE
+        exit 0
+        ;;
+      *)
+        fail "Unknown option: $1 (try --help)"
+        ;;
+    esac
+  done
 
   [ "$(uname -s)" = Darwin ] || fail "CloudPlayer is a macOS app."
   local major
@@ -38,13 +87,26 @@ main() {
     *) fail "Unsupported architecture: $(uname -m)" ;;
   esac
 
-  local url="https://github.com/$repo/releases/download/latest/CloudPlayer-macos-$arch.zip"
+  local url label
+  if [ -n "$version" ]; then
+    label="$version"
+    url="https://github.com/$repo/releases/download/$version/CloudPlayer-macos-$arch.zip"
+  elif [ "$channel" = "nightly" ]; then
+    label="nightly"
+    url="https://github.com/$repo/releases/download/nightly/CloudPlayer-macos-$arch.zip"
+  elif [ "$channel" = "stable" ]; then
+    label="latest stable"
+    url="https://github.com/$repo/releases/latest/download/CloudPlayer-macos-$arch.zip"
+  else
+    fail "Unknown CLOUDPLAYER_CHANNEL: '$channel' (expected 'stable' or 'nightly')."
+  fi
+
   local tmp
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/cloudplayer.XXXXXX")"
   # shellcheck disable=SC2064  # expand now: $tmp is local and gone when the trap runs
   trap "rm -rf '$tmp'" EXIT
 
-  step "Downloading CloudPlayer ($arch)"
+  step "Downloading CloudPlayer ($label, $arch)"
   curl -fL --progress-bar -o "$tmp/CloudPlayer.zip" "$url" || fail "Download failed: $url"
 
   step "Unpacking"

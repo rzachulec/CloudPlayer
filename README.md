@@ -14,16 +14,23 @@ A native macOS player for SoundCloud, built with SwiftUI + WebKit. Requires macO
 curl -fsSL https://raw.githubusercontent.com/rzachulec/CloudPlayer/main/install.sh | bash
 ```
 
+To test the latest staging (`nightly`) build from `main` before it is promoted to a versioned release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rzachulec/CloudPlayer/main/install.sh | bash -s -- --nightly
+```
+
 This downloads the right build for your Mac, quits CloudPlayer if it's running, puts it in
 `/Applications`, and opens it. Run it again any time to update; you stay signed in, because your
 SoundCloud session lives in `~/Library`, not inside the app. Read [`install.sh`](install.sh) first
-if you like: it's short. Options go before `bash`, e.g. `… | CLOUDPLAYER_DIR=~/Applications bash`
-installs elsewhere, and `CLOUDPLAYER_NO_LAUNCH=1` skips opening the app.
+if you like: it's short. Options go before `bash` (e.g. `… | CLOUDPLAYER_DIR=~/Applications bash`,
+`CLOUDPLAYER_NO_LAUNCH=1`, `CLOUDPLAYER_CHANNEL=nightly`) or after `bash -s --` (`--nightly`,
+`--version v0.1.0`).
 
-## Download
+## Download & Releases
 
-Every push to `main` builds the app for both Mac architectures, signs it with a self-signed
-certificate, and publishes it on the [**latest** release](../../releases/tag/latest):
+- **Stable releases** (`v*`): published on [Releases](../../releases/latest) with auto-generated changelogs (see [`CHANGELOG.md`](CHANGELOG.md)).
+- **Nightly / staging builds**: every push to `main` builds both Mac architectures, signs them with a self-signed certificate, and updates the rolling [**nightly** pre-release](../../releases/tag/nightly).
 
 | Mac | File |
 | --- | --- |
