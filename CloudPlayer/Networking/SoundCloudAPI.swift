@@ -181,6 +181,86 @@ actor SoundCloudAPI {
         return entries.compactMap { $0.fullTrack ?? hydratedByID[$0.id] }
     }
 
+    // MARK: - Search & Library Endpoints
+
+    func searchTracks(query: String, limit: Int = 30, nextHref: String? = nil) async throws -> SCCollectionPage<SCTrack> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/search/tracks",
+            query: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func searchPlaylists(query: String, limit: Int = 30, nextHref: String? = nil) async throws -> SCCollectionPage<SCPlaylist> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/search/playlists_without_albums",
+            query: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func searchAlbums(query: String, limit: Int = 30, nextHref: String? = nil) async throws -> SCCollectionPage<SCPlaylist> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/search/albums",
+            query: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func searchUsers(query: String, limit: Int = 30, nextHref: String? = nil) async throws -> SCCollectionPage<SCUser> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/search/users",
+            query: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func fetchLibraryCollections(limit: Int = 50, nextHref: String? = nil) async throws -> SCCollectionPage<SCLibraryItem> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/me/library/all",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func fetchUserFollowings(userID: Int, limit: Int = 50, nextHref: String? = nil) async throws -> SCCollectionPage<SCUser> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/users/\(userID)/followings",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func fetchPersonalizedStations(limit: Int = 30) async throws -> [SCPlaylist] {
+        let page: SCCollectionPage<SCStationItem> = try await get(
+            path: "/me/personalized-stations",
+            query: [URLQueryItem(name: "limit", value: String(limit))]
+        )
+        return page.collection.compactMap(\.playlist)
+    }
+
     // MARK: - Core Request Pipeline
 
     func get<T: Decodable>(path: String, query: [URLQueryItem] = []) async throws -> T {

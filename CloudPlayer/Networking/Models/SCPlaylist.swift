@@ -149,3 +149,47 @@ struct SCHistoryItem: Codable, Sendable {
         case track
     }
 }
+
+/// Wrapper for `/me/library/all` entries (playlists, albums, system playlists).
+struct SCLibraryItem: Codable, Sendable {
+    let type: String?
+    let playlist: SCPlaylist?
+    let systemPlaylist: SCPlaylist?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case playlist
+        case systemPlaylist = "system_playlist"
+    }
+
+    var resolvedPlaylist: SCPlaylist? {
+        playlist ?? systemPlaylist
+    }
+}
+
+/// Wrapper for `/me/personalized-stations` entries.
+struct SCStationItem: Codable, Sendable {
+    let playlist: SCPlaylist?
+    let systemPlaylist: SCPlaylist?
+
+    enum CodingKeys: String, CodingKey {
+        case playlist
+        case systemPlaylist = "system_playlist"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let pl = try? container.decodeIfPresent(SCPlaylist.self, forKey: .playlist)
+        let sys = try? container.decodeIfPresent(SCPlaylist.self, forKey: .systemPlaylist)
+        if let direct = pl ?? sys {
+            self.playlist = direct
+            self.systemPlaylist = nil
+        } else if let directPl = try? SCPlaylist(from: decoder) {
+            self.playlist = directPl
+            self.systemPlaylist = nil
+        } else {
+            self.playlist = nil
+            self.systemPlaylist = nil
+        }
+    }
+}

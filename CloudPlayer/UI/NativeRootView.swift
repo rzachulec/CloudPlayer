@@ -41,18 +41,28 @@ private struct NativeMainShell: View {
         )
 
         NavigationSplitView(columnVisibility: $columns) {
-            List(selection: sidebarBinding) {
-                Section {
-                    Label(NativeSidebarItem.home.title, systemImage: NativeSidebarItem.home.symbol)
-                        .tag(NativeSidebarItem.home)
-                }
-                Section("Library") {
-                    ForEach(NativeSidebarItem.library) { item in
-                        Label(item.title, systemImage: item.symbol).tag(item)
+            ZStack(alignment: .bottom) {
+                List(selection: sidebarBinding) {
+                    Section {
+                        Label(NativeSidebarItem.home.title, systemImage: NativeSidebarItem.home.symbol)
+                            .tag(NativeSidebarItem.home)
+                    }
+                    Section("Library") {
+                        ForEach(NativeSidebarItem.library) { item in
+                            Label(item.title, systemImage: item.symbol).tag(item)
+                        }
                     }
                 }
+                .listStyle(.sidebar)
+
+                if let toast = app.toast {
+                    NativeToastView(toast: toast) { app.toast = nil }
+                        .padding(10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .zIndex(10)
+                }
             }
-            .listStyle(.sidebar)
+            .animation(.spring(duration: 0.32), value: app.toast)
             .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
         } detail: {
             ZStack(alignment: .bottom) {
@@ -146,20 +156,20 @@ private struct NativeMainShell: View {
             HomeView(app: app)
         case .likes:
             LikesView(app: app)
+        case .playlists:
+            LibraryCollectionsView(kind: .playlists, app: app)
+        case .albums:
+            LibraryCollectionsView(kind: .albums, app: app)
+        case .stations:
+            StationsView(app: app)
+        case .following:
+            FollowingView(app: app)
         case .history:
             HistoryView(app: app)
+        case .search(let query):
+            SearchView(query: query, app: app)
         case .playlist(let playlist):
             CollectionDetailView(playlist: playlist, app: app)
-        case .playlists:
-            MilestonePlaceholderView(title: "Playlists", symbol: "music.note.list", milestone: "Milestone 5")
-        case .albums:
-            MilestonePlaceholderView(title: "Albums", symbol: "square.stack", milestone: "Milestone 5")
-        case .stations:
-            MilestonePlaceholderView(title: "Stations", symbol: "dot.radiowaves.left.and.right", milestone: "Milestone 5")
-        case .following:
-            MilestonePlaceholderView(title: "Following", symbol: "person.2", milestone: "Milestone 5")
-        case .search(let query):
-            MilestonePlaceholderView(title: "Search: “\(query)”", symbol: "magnifyingglass", milestone: "Milestone 5")
         case .track(let track):
             MilestonePlaceholderView(title: track.title, symbol: "waveform", milestone: "Milestone 6")
         case .user(let user):
@@ -192,5 +202,43 @@ private struct MilestonePlaceholderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+private struct NativeToastView: View {
+    let toast: NativeToast
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if let url = toast.artworkURL {
+                CachedArtwork(url: url, size: 34, cornerRadius: 6)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.tint)
+            }
+            Text(toast.text)
+                .font(.system(size: 12))
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .modifier(NativeToastGlass())
+        .contentShape(Rectangle())
+        .onTapGesture(perform: dismiss)
+    }
+}
+
+private struct NativeToastGlass: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            content
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+        }
     }
 }
