@@ -1343,9 +1343,14 @@ enum Theme {
       -webkit-overflow-scrolling: touch;
     }
     .tileGallery__slider::-webkit-scrollbar { display: none !important; }
+    /* SoundCloud caps the panel at artwork + one text line (e.g. max-height: 208px); with the
+       slider's overflow-y: hidden above, that clipped the artist line under every tile. */
     .tileGallery__sliderPanel {
       transform: none !important; transition: none !important;
+      height: auto !important; max-height: none !important;
     }
+    /* The tiles' own bottom margin (sc-mb-6x) used to be clipped away too; drop it so rows stay tight. */
+    .tileGallery .playableTile { margin-bottom: 0 !important; }
     .tileGallery__sliderPeekContainer { animation: none !important; }
 
     /* Prev / next button containers: sit above the tiles and only intercept clicks on the button itself. */
