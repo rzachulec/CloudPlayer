@@ -20,217 +20,191 @@ struct NativeRootView: View {
                 app.handleAuthenticated(session)
             }
         case .signedIn:
-            Milestone2PlayerShell(app: app, onMini: onMini, onSignOut: onSignOut)
+            NativeMainShell(app: app, onMini: onMini, onSignOut: onSignOut)
         }
     }
 }
 
-/// Milestone 2 shell: real Likes feed fetched via pure-Swift `SoundCloudAPI`,
-/// playable through `AudioEngine` (`AVPlayer`), with floating Liquid Glass `NativePlayerBar`.
-private struct Milestone2PlayerShell: View {
+private struct NativeMainShell: View {
     @Bindable var app: AppController
     var onMini: () -> Void
     var onSignOut: () -> Void
 
-    @State private var tracks: [SCTrack] = []
-    @State private var nextHref: String?
-    @State private var isLoading = false
-    @State private var loadError: String?
+    @State private var columns: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    header
-                    Divider()
-                    content
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                if app.audio.queueVisible {
-                    Divider()
-                    quickQueueSidebar
-                        .frame(width: 320)
-                        .transition(.move(edge: .trailing))
-                }
+        let sidebarBinding = Binding<NativeSidebarItem?>(
+            get: { app.router.selectedSidebar },
+            set: { item in
+                if let item { app.router.selectSidebar(item) }
             }
+        )
 
-            VStack(spacing: 8) {
-                if let err = app.audio.errorMessage {
-                    Text(err)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(.red.opacity(0.85), in: Capsule())
+        NavigationSplitView(columnVisibility: $columns) {
+            List(selection: sidebarBinding) {
+                Section {
+                    Label(NativeSidebarItem.home.title, systemImage: NativeSidebarItem.home.symbol)
+                        .tag(NativeSidebarItem.home)
                 }
-                NativePlayerBar(app: app, onMini: onMini)
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 14)
-            .padding(.trailing, app.audio.queueVisible ? 320 : 0)
-            .animation(.easeOut(duration: 0.22), value: app.audio.queueVisible)
-        }
-        .frame(minWidth: 680, maxWidth: .infinity, minHeight: 500, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor).ignoresSafeArea())
-        .task(id: app.currentUser?.id) {
-            await loadInitialLikes()
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Likes")
-                    .font(.system(size: 22, weight: .bold))
-                if let user = app.currentUser {
-                    Text("\(user.displayName) · \(user.likesCount ?? tracks.count) liked tracks · Zero WebKit")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if !tracks.isEmpty {
-                Button {
-                    if let first = tracks.first {
-                        app.audio.play(track: first, inContext: tracks, contextTitle: "Likes")
+                Section("Library") {
+                    ForEach(NativeSidebarItem.library) { item in
+                        Label(item.title, systemImage: item.symbol).tag(item)
                     }
-                } label: {
-                    Label("Play", systemImage: "play.fill")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
+            .safeAreaInset(edge: .bottom) {
+                if let toast = app.toast {
+                    NativeToastView(toast: toast) { app.toast = nil }
+                        .padding(10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(duration: 0.32), value: app.toast)
+        } detail: {
+            ZStack(alignment: .bottom) {
+                HStack(spacing: 0) {
+                    routeView
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Button {
-                    app.audio.playShuffled(tracks: tracks, contextTitle: "Likes")
-                } label: {
-                    Label("Shuffle", systemImage: "shuffle")
+                    if app.audio.queueVisible {
+                        Divider()
+                        UpNextSidebar(app: app)
+                            .frame(width: 320)
+                            .transition(.move(edge: .trailing))
+                    }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+
+                VStack(spacing: 8) {
+                    if let err = app.audio.errorMessage {
+                        Text(err)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.red.opacity(0.85), in: Capsule())
+                    }
+                    NativePlayerBar(app: app, onMini: onMini)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 14)
+                .padding(.trailing, app.audio.queueVisible ? 320 : 0)
+                .animation(.easeOut(duration: 0.22), value: app.audio.queueVisible)
             }
-            Menu {
-                Button("Refresh") { Task { await loadInitialLikes(force: true) } }
-                Divider()
-                Button("Sign Out…", role: .destructive, action: onSignOut)
-            } label: {
-                Image(systemName: "person.crop.circle")
-                    .font(.system(size: 16))
+            .frame(minWidth: 520, minHeight: 500)
+            .toolbar {
+                ToolbarItemGroup(placement: .navigation) {
+                    Button(action: toggleSidebar) {
+                        Label("Toggle Sidebar", systemImage: "sidebar.left")
+                    }
+                    .help("Show or Hide Sidebar (⌃⌘S)")
+                }
+                ToolbarItemGroup(placement: .navigation) {
+                    Button { app.router.goBack() } label: {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                    .disabled(!app.router.canGoBack)
+                    .help("Back (⌘[)")
+
+                    Button { app.router.goForward() } label: {
+                        Label("Forward", systemImage: "chevron.right")
+                    }
+                    .disabled(!app.router.canGoForward)
+                    .help("Forward (⌘])")
+                }
+                ToolbarItem(placement: .principal) {
+                    ToolbarSearchField(prompt: "Search SoundCloud") { query in
+                        app.router.search(query)
+                    }
+                    .frame(width: 340)
+                }
+                if #available(macOS 26.0, *) {
+                    ToolbarSpacer(.flexible)
+                }
+                ToolbarItem(placement: .automatic) {
+                    Menu {
+                        if let user = app.currentUser {
+                            Text(user.displayName)
+                            Divider()
+                            Button("Profile") { app.router.navigate(to: .user(user)) }
+                        }
+                        if let url = URL(string: "https://soundcloud.com/settings") {
+                            Button("SoundCloud Settings (Browser)") { NSWorkspace.shared.open(url) }
+                        }
+                        Divider()
+                        Button("Sign Out…", role: .destructive, action: onSignOut)
+                    } label: {
+                        Label("Account", systemImage: "person.crop.circle")
+                    }
+                    .menuIndicator(.hidden)
+                    .help("Account")
+                }
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .onReceive(NotificationCenter.default.publisher(for: .cpToggleSidebar)) { _ in
+            toggleSidebar()
+        }
     }
 
     @ViewBuilder
-    private var content: some View {
-        if isLoading && tracks.isEmpty {
-            VStack(spacing: 10) {
-                ProgressView()
-                Text("Loading your liked tracks…")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let loadError, tracks.isEmpty {
-            VStack(spacing: 10) {
-                Text(loadError)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                Button("Retry") { Task { await loadInitialLikes(force: true) } }
-                    .buttonStyle(.borderedProminent)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(tracks) { track in
-                        let isCurrent = app.audio.currentTrack?.id == track.id
-                        trackRow(track, isCurrent: isCurrent)
-                            .onAppear {
-                                if track.id == tracks.last?.id, nextHref != nil {
-                                    Task { await loadMoreLikes() }
-                                }
-                            }
-                    }
-                    if isLoading && !tracks.isEmpty {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(.vertical, 16)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 84)
-            }
+    private var routeView: some View {
+        switch app.router.current {
+        case .likes:
+            LikesView(app: app)
+        case .home:
+            MilestonePlaceholderView(title: "Home", symbol: "house", milestone: "Milestone 4")
+        case .history:
+            MilestonePlaceholderView(title: "History", symbol: "clock", milestone: "Milestone 4")
+        case .playlists:
+            MilestonePlaceholderView(title: "Playlists", symbol: "music.note.list", milestone: "Milestone 5")
+        case .albums:
+            MilestonePlaceholderView(title: "Albums", symbol: "square.stack", milestone: "Milestone 5")
+        case .stations:
+            MilestonePlaceholderView(title: "Stations", symbol: "dot.radiowaves.left.and.right", milestone: "Milestone 5")
+        case .following:
+            MilestonePlaceholderView(title: "Following", symbol: "person.2", milestone: "Milestone 5")
+        case .search(let query):
+            MilestonePlaceholderView(title: "Search: “\(query)”", symbol: "magnifyingglass", milestone: "Milestone 5")
+        case .track(let track):
+            MilestonePlaceholderView(title: track.title, symbol: "waveform", milestone: "Milestone 6")
+        case .user(let user):
+            MilestonePlaceholderView(title: user.displayName, symbol: "person.crop.circle", milestone: "Milestone 6")
         }
     }
 
-    private func trackRow(_ track: SCTrack, isCurrent: Bool) -> some View {
-        let liked = app.library.isLiked(track.id)
-        return HStack(spacing: 12) {
-            ZStack {
-                CachedArtwork(url: track.resolvedArtworkURL(size: .small), size: 42, cornerRadius: 5)
-                if isCurrent {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(.black.opacity(0.45))
-                        .frame(width: 42, height: 42)
-                    Image(systemName: app.audio.isPlaying ? "waveform" : "pause.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(track.title)
-                        .font(.system(size: 13, weight: isCurrent ? .semibold : .medium))
-                        .foregroundStyle(isCurrent ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                        .lineLimit(1)
-                    if track.isPreviewOnly {
-                        Text("Go+")
-                            .font(.system(size: 9, weight: .bold))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(.secondary.opacity(0.2), in: Capsule())
-                    }
-                }
-                Text(track.artistName)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            Text(formatTime(track.durationSeconds))
-                .font(.system(size: 11).monospacedDigit())
+    private func toggleSidebar() {
+        withAnimation {
+            columns = columns == .detailOnly ? .all : .detailOnly
+        }
+    }
+}
+
+private struct MilestonePlaceholderView: View {
+    let title: String
+    let symbol: String
+    let milestone: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .font(.system(size: 18, weight: .semibold))
+            Text("Scheduled for \(milestone)")
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-            IconButton(symbol: liked ? "heart.fill" : "heart", size: 12, active: liked, help: liked ? "Unlike" : "Like") {
-                app.library.toggleLike(trackID: track.id, userID: app.currentUser?.id)
-            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isCurrent ? Color.accentColor.opacity(0.10) : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            app.audio.play(track: track, inContext: tracks, contextTitle: "Likes")
-        }
-        .contextMenu {
-            Button("Play") { app.audio.play(track: track, inContext: tracks, contextTitle: "Likes") }
-            Button("Play Next") { app.audio.enqueueNext(track) }
-            Button("Add to Up Next") { app.audio.enqueueLater(track) }
-            Divider()
-            Button(liked ? "Unlike" : "Like") {
-                app.library.toggleLike(trackID: track.id, userID: app.currentUser?.id)
-            }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
     }
+}
 
-    private var quickQueueSidebar: some View {
+private struct UpNextSidebar: View {
+    @Bindable var app: AppController
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Up Next")
@@ -261,7 +235,7 @@ private struct Milestone2PlayerShell: View {
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 12)
                             .padding(.top, 4)
-                        ForEach(app.audio.queue.contextQueue.prefix(40)) { t in
+                        ForEach(app.audio.queue.contextQueue.prefix(50)) { t in
                             queueRow(t)
                         }
                     }
@@ -290,41 +264,45 @@ private struct Milestone2PlayerShell: View {
         .padding(.horizontal, 12)
         .contentShape(Rectangle())
         .onTapGesture {
-            app.audio.play(track: track, inContext: tracks, contextTitle: app.audio.queue.contextTitle)
+            app.audio.play(track: track, inContext: app.audio.queue.contextQueue, contextTitle: app.audio.queue.contextTitle)
         }
     }
+}
 
-    private func loadInitialLikes(force: Bool = false) async {
-        guard let uid = app.currentUser?.id else { return }
-        if !force && !tracks.isEmpty { return }
-        isLoading = true
-        loadError = nil
-        defer { isLoading = false }
-        do {
-            let page = try await app.api.fetchTrackLikes(userID: uid, limit: 50)
-            let fetched = page.collection.compactMap(\.track)
-            tracks = fetched
-            nextHref = page.nextHref
-            app.library.registerLikedTracks(fetched)
-        } catch {
-            loadError = error.localizedDescription
+private struct NativeToastView: View {
+    let toast: NativeToast
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if let url = toast.artworkURL {
+                CachedArtwork(url: url, size: 34, cornerRadius: 6)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.tint)
+            }
+            Text(toast.text)
+                .font(.system(size: 12))
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .modifier(NativeToastGlass())
+        .contentShape(Rectangle())
+        .onTapGesture(perform: dismiss)
     }
+}
 
-    private func loadMoreLikes() async {
-        guard let uid = app.currentUser?.id, let next = nextHref, !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            let page = try await app.api.fetchTrackLikes(userID: uid, nextHref: next)
-            let fetched = page.collection.compactMap(\.track)
-            let existing = Set(tracks.map(\.id))
-            let unique = fetched.filter { !existing.contains($0.id) }
-            tracks.append(contentsOf: unique)
-            nextHref = page.nextHref
-            app.library.registerLikedTracks(unique)
-        } catch {
-            // Keep existing list on pagination error
+private struct NativeToastGlass: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            content
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
         }
     }
 }

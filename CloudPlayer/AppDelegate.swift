@@ -118,6 +118,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func toggleLike(_ sender: Any?) { app.toggleLikeCurrentTrack() }
     @objc func toggleShuffle(_ sender: Any?) { app.audio.toggleShuffle() }
     @objc func cycleRepeat(_ sender: Any?) { app.audio.cycleRepeat() }
+    @objc func back(_ sender: Any?) { app.router.goBack() }
+    @objc func forward(_ sender: Any?) { app.router.goForward() }
+
+    @objc func toggleSidebarColumn(_ sender: Any?) {
+        showMain()
+        NotificationCenter.default.post(name: .cpToggleSidebar, object: nil)
+    }
+
+    @objc func focusSearch(_ sender: Any?) {
+        showMain()
+        NotificationCenter.default.post(name: .cpFocusSearch, object: nil)
+    }
+
+    @objc func goToSection(_ sender: NSMenuItem) {
+        showMain()
+        let items = NativeSidebarItem.allCases
+        if items.indices.contains(sender.tag) {
+            app.router.selectSidebar(items[sender.tag])
+        }
+    }
 
     @objc func signOut(_ sender: Any?) {
         let alert = NSAlert()
@@ -175,10 +195,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             item("Copy", #selector(NSText.copy(_:)), "c"),
             item("Paste", #selector(NSText.paste(_:)), "v"),
             item("Select All", #selector(NSText.selectAll(_:)), "a"),
+            .separator(),
+            item("Search", #selector(focusSearch(_:)), "f", target: self),
         ]))
         menu.addItem(submenu("View", [
+            item("Toggle Sidebar", #selector(toggleSidebarColumn(_:)), "s", [.command, .control], target: self),
+            .separator(),
             item("Mini Player", #selector(toggleMini(_:)), "m", [.command, .shift], target: self),
         ]))
+        var go: [NSMenuItem] = [
+            item("Back", #selector(back(_:)), "[", target: self),
+            item("Forward", #selector(forward(_:)), "]", target: self),
+            .separator(),
+        ]
+        for (i, section) in NativeSidebarItem.allCases.enumerated() {
+            let mi = item(section.title, #selector(goToSection(_:)), "\(i + 1)", target: self)
+            mi.tag = i
+            go.append(mi)
+        }
+        menu.addItem(submenu("Go", go))
         menu.addItem(submenu("Controls", [
             item("Play/Pause", #selector(playPause(_:)), "p", target: self),
             item("Next", #selector(nextTrack(_:)), String(UnicodeScalar(NSRightArrowFunctionKey)!), [.command, .option], target: self),
