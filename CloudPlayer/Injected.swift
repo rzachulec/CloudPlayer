@@ -37,14 +37,14 @@ enum Injected {
     .footerModule
     { display: none !important; }
 
-    .l-fluid-fixed:has(.modular-home-mixed-selection, .l-user-main, .tagsMain, .l-listen-wrapper, .systemPlaylistTrackList, .listenDetails) > .l-sidebar-right,
-    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .listenDetails, .l-hero-banner) .l-sidebar-right,
+    .l-fluid-fixed:has(.modular-home-mixed-selection, .l-user-main, .tagsMain, .l-listen-wrapper, .systemPlaylistTrackList, .systemPlaylistTrackList__item, .listenDetails) > .l-sidebar-right,
+    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .systemPlaylistTrackList__item, .listenDetails, .l-hero-banner) .l-sidebar-right,
     .l-sidebar-right:has(.listenNetworkSidebar),
     .l-user-sidebar-right,
     .l-listen--main > .l-sidebar-right
     { display: none !important; }
-    .l-fluid-fixed:has(.modular-home-mixed-selection, .l-user-main, .tagsMain, .l-listen-wrapper, .systemPlaylistTrackList, .listenDetails) > .l-main,
-    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .listenDetails, .l-hero-banner) .l-main,
+    .l-fluid-fixed:has(.modular-home-mixed-selection, .l-user-main, .tagsMain, .l-listen-wrapper, .systemPlaylistTrackList, .systemPlaylistTrackList__item, .listenDetails) > .l-main,
+    #content:has(.l-listen-wrapper, .systemPlaylistTrackList, .systemPlaylistTrackList__item, .listenDetails, .l-hero-banner) .l-main,
     .l-listen--main > .l-main {
       width: auto !important; max-width: none !important; float: none !important;
       margin-right: 0 !important; padding-right: 0 !important; border-right: 0 !important;
@@ -1969,33 +1969,23 @@ enum Injected {
     // to load the Likes queue, and immediately skips Next to land on a random liked track.
     const normHref = (h) => (h || '').split('?')[0].replace(/\/+$/, '');
 
-    // Some uploads are titled (or their uploader named) with only invisible characters, e.g.
-    // U+200E, which leaves blank rows such as "1 ·  ·" in mixes. Show a name from the link's
-    // URL slug instead: the track slug for titles, the profile slug for usernames.
-    const INVISIBLE = /[\s­͏ᅟᅠ឴឵᠎​-‏‪-‮⁠-⁯⠀ㅤ﻿ﾠ]/g;
-    const BLANK_NAME_SEL = '.trackItem__trackTitle, .trackItem__username, .fullHero__titleTextText, ' +
-      '.soundTitle__title, .soundTitle__username, .playableTile__mainHeading a, .playableTile__usernameHeading, ' +
-      '.playbackSoundBadge__titleLink, .playbackSoundBadge__lightLink';
-    const slugName = (slug) => decodeURIComponent(slug || '').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
-    const fillBlankNames = () => {
-      for (const el of document.querySelectorAll(BLANK_NAME_SEL)) {
-        if (el.dataset.cpBlankFixed === el.textContent) continue;   // already filled, unchanged since
-        // Mix heroes read "Related tracks: <seed title>": only the part after the prefix can be blank.
-        const prefix = el.matches('.fullHero__titleTextText') ? ((el.textContent || '').match(/^\s*Related tracks:/i) || [''])[0].trim() : '';
-        if ((el.textContent || '').slice(prefix ? (el.textContent || '').indexOf(':') + 1 : 0).replace(INVISIBLE, '') !== '') continue;
-        const a = el.closest('a[href]') || el.querySelector('a[href]');
-        const segs = normHref(a ? a.getAttribute('href') : '').split('/').filter(Boolean);
-        if (!segs.length) continue;
-        const isUser = el.matches('.trackItem__username, .soundTitle__username, .playableTile__usernameHeading, .playbackSoundBadge__lightLink');
-        const name = slugName(isUser ? segs[0] : segs[segs.length - 1]);
-        if (!name) continue;
-        // Keep any child elements (icons); replace only the text.
-        const target = el.querySelector('span:not(:has(*))') || el;
-        target.textContent = prefix ? `${prefix} ${name}` : name;
-        el.classList.add('cp-untitled');
-        el.dataset.cpBlankFixed = el.textContent;
+    // System playlists (/discover/sets/…: mixes, stations, charts): the tracklist sits in
+    // SoundCloud's narrower main column. Mark each element from the first row up to .l-main
+    // (Theme.nativeCSS widens .cp-fullwidth) so the list spans the window like other playlists.
+    const widenSystemPlaylist = () => {
+      const on = /^\/discover\/sets\//.test(location.pathname);
+      const keep = new Set();
+      const first = on && document.querySelector('.systemPlaylistTrackList__item');
+      if (first) {
+        for (let e = first.parentElement; e && e !== document.body && e.id !== 'content'; e = e.parentElement) {
+          keep.add(e);
+          if (!e.classList.contains('cp-fullwidth')) e.classList.add('cp-fullwidth');
+          if (e.classList.contains('l-main')) break;
+        }
       }
+      for (const e of document.querySelectorAll('.cp-fullwidth')) if (!keep.has(e)) e.classList.remove('cp-fullwidth');
     };
+
     const isLikesPage = () => location.pathname.replace(/\/+$/, '') === '/you/likes';
     const isShuffling = () => {
       const b = $('button.shuffleControl');
@@ -2158,7 +2148,7 @@ enum Injected {
     // Runs synchronously after each DOM change (before paint), so hidden sections never
     // render and their artwork is never requested.
     new MutationObserver((records) => {
-      hideSections(); leaveFeed(); applyThemeClass(); profileView(); networkView(); settingsView(); syncViewToggles(); unclipSearchOptions(); heroActions(); setupTileGalleries(); syncSearchPlayAll(); syncLikesActions(); fillBlankNames();
+      hideSections(); leaveFeed(); applyThemeClass(); profileView(); networkView(); settingsView(); syncViewToggles(); unclipSearchOptions(); heroActions(); setupTileGalleries(); syncSearchPlayAll(); syncLikesActions(); widenSystemPlaylist();
       for (const r of records) if (r.addedNodes.length) tagToasts(r.addedNodes);
     })
       .observe(document.documentElement, { childList: true, subtree: true });
