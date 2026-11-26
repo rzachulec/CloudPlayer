@@ -1,5 +1,4 @@
 import AppKit
-import MediaPlayer
 import SwiftUI
 
 @MainActor
@@ -8,14 +7,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var mainWindow: NSWindow!
     private var miniPanel: NSPanel!
     private var statusItem: NSStatusItem!
-    private var nowPlaying: NowPlaying!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMainMenu()
         buildMainWindow()
         buildMiniPanel()
         buildStatusItem()
-        nowPlaying = NowPlaying(player: player)
         player.load()
         showMain()
     }
@@ -40,15 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private var isTerminating = false
 
-    /// Quit cleanly: clear Now Playing, stop and release the audio stream, unload the page so
-    /// WebKit flushes storage, then exit. Capped at 2 s so quitting can never hang.
+    /// Quit cleanly: stop and release the audio stream (which also ends WebKit's Now Playing
+    /// entry), unload the page so WebKit flushes storage, then exit. Capped at 2 s so quitting can never hang.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if isTerminating { return .terminateNow }
         isTerminating = true
-
-        let center = MPNowPlayingInfoCenter.default()
-        center.nowPlayingInfo = nil
-        center.playbackState = .stopped
 
         var replied = false
         let finish: @MainActor () -> Void = {

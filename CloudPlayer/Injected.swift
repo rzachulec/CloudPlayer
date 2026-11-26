@@ -138,6 +138,51 @@ enum Injected {
         "Curated by SoundCloud",
     ]
 
+    /// macOS Now Playing comes from WebKit: it publishes one entry for the page's playing audio
+    /// (from navigator.mediaSession, or else the page title and icon), and that can't be turned
+    /// off, so CloudPlayer uses it as its only entry. This shim tidies what SoundCloud reports:
+    /// title + artist without the empty album (shown as a stray "–"), 500px artwork, and
+    /// Next/Previous wired to CloudPlayer's player, since SoundCloud doesn't register them.
+    /// Runs in every frame before SoundCloud's scripts.
+    static let mediaSessionShim = #"""
+    (() => {
+      const ms = navigator.mediaSession;
+      if (!ms || window.__cpMediaShim) return;
+      window.__cpMediaShim = true;
+      const proto = Object.getPrototypeOf(ms);
+      const metaDesc = Object.getOwnPropertyDescriptor(proto, 'metadata');
+      const setHandler = proto.setActionHandler;
+      if (!metaDesc || !metaDesc.set || !setHandler) return;
+
+      let original = null;
+      const tidy = (m) => {
+        if (!m) return null;
+        try {
+          const art = [...(m.artwork || [])].pop();
+          const src = art && art.src ? art.src.replace(/-(t\d+x\d+|large|small|badge|tiny|crop)\./, '-t500x500.') : '';
+          return new MediaMetadata({
+            title: m.title || '', artist: m.artist || '',
+            artwork: src ? [{ src, sizes: '500x500', type: art.type || 'image/jpeg' }] : [],
+          });
+        } catch (e) { return m; }
+      };
+      try {
+        Object.defineProperty(ms, 'metadata', {
+          configurable: true,
+          get: () => original,
+          set: (v) => { original = v; metaDesc.set.call(ms, tidy(v)); },
+        });
+      } catch (e) {}
+
+      const cp = (name) => () => { const CP = (window.top || window).CP; if (CP) CP.cmd(name); };
+      const ours = { nexttrack: cp('next'), previoustrack: cp('prev') };
+      ms.setActionHandler = (action, handler) => setHandler.call(ms, action, ours[action] || handler);
+      for (const [action, handler] of Object.entries(ours)) {
+        try { setHandler.call(ms, action, handler); } catch (e) {}
+      }
+    })();
+    """#
+
     /// Runs in SoundCloud's same-origin "/n/…" iframes (track pages): styles the track header.
     static func frameScript(theme: Theme.Snapshot) -> String {
         """
