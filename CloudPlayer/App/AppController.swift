@@ -27,17 +27,17 @@ final class AppController {
     private(set) var sessionHistory: [SCTrack] = []
     var focusTrack: SCTrack?
     var isFocusVisible = false
-    var focusOriginRect: CGRect?
+    var focusZoomAnimation = false
     var onFocusOverlayChanged: ((Bool) -> Void)?
     private var focusExitTask: Task<Void, Never>?
 
     var isFocusMode: Bool { isFocusVisible }
 
-    func enterFocusMode(track: SCTrack? = nil, originRect: CGRect? = nil) {
+    func enterFocusMode(track: SCTrack? = nil, zoomFromCover: Bool = false) {
         guard let target = track ?? audio.currentTrack else { return }
         focusExitTask?.cancel()
         focusTrack = target
-        focusOriginRect = originRect
+        focusZoomAnimation = zoomFromCover
         isFocusVisible = true
         onFocusOverlayChanged?(true)
     }
@@ -47,10 +47,10 @@ final class AppController {
         isFocusVisible = false
         focusExitTask?.cancel()
         focusExitTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(340))
+            try? await Task.sleep(for: .milliseconds(260))
             guard !Task.isCancelled, let self, !self.isFocusVisible else { return }
             self.focusTrack = nil
-            self.focusOriginRect = nil
+            self.focusZoomAnimation = false
             self.onFocusOverlayChanged?(false)
         }
     }

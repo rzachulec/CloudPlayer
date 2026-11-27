@@ -2,8 +2,8 @@ import NukeUI
 import SwiftUI
 
 /// Full-window distraction-free Focus Mode showing only artwork, title, and artist over a blurred backdrop.
-/// - Launched from the Now Playing cover: scales and flies the cover smoothly from/to its exact screen rect.
-/// - Launched from the media controls pill: cleanly fades in and out.
+/// - Launched from the Now Playing cover: scales the cover cleanly in and out (`0.72 ↔ 1.0`).
+/// - Launched from the media controls pill: pure opacity fade in and out.
 struct FocusModeView: View {
     @Bindable var app: AppController
     var cornerRadius: CGFloat = 16
@@ -13,7 +13,7 @@ struct FocusModeView: View {
     @State private var expanded = false
 
     private var track: SCTrack? { app.focusTrack ?? app.audio.currentTrack }
-    private var originRect: CGRect? { app.focusOriginRect }
+    private var zoomCover: Bool { app.focusZoomAnimation }
 
     var body: some View {
         ZStack {
@@ -25,24 +25,9 @@ struct FocusModeView: View {
                 GeometryReader { geo in
                     let artSize = min(max(min(geo.size.width * 0.50, geo.size.height * 0.56), 180), 500)
                     let dir = app.audio.lastTransitionDirection
-                    let targetCenterX = geo.size.width / 2
-                    let targetCenterY = geo.size.height / 2 - 36
-
-                    let coverScale: CGFloat = {
-                        guard !expanded, let origin = originRect, artSize > 0 else { return 1.0 }
-                        return origin.width / artSize
-                    }()
-                    let coverPosX: CGFloat = {
-                        guard !expanded, let origin = originRect else { return targetCenterX }
-                        return origin.midX
-                    }()
-                    let coverPosY: CGFloat = {
-                        guard !expanded, let origin = originRect else { return targetCenterY }
-                        return origin.midY
-                    }()
 
                     ZStack {
-                        ZStack {
+                        VStack(spacing: 24) {
                             Button {
                                 app.exitFocusMode()
                             } label: {
@@ -51,16 +36,15 @@ struct FocusModeView: View {
                                     size: artSize,
                                     cornerRadius: max(14, artSize * 0.045)
                                 )
-                                .shadow(color: .black.opacity(expanded ? 0.5 : 0.35), radius: expanded ? 34 : 18, y: expanded ? 16 : 8)
+                                .shadow(color: .black.opacity(0.5), radius: 34, y: 16)
                                 .scaleEffect(isCoverHovered && expanded ? 1.012 : 1.0)
                                 .animation(.easeOut(duration: 0.18), value: isCoverHovered)
                             }
                             .buttonStyle(.plain)
                             .onHover { isCoverHovered = $0 }
                             .help("Exit Focus Mode (Esc)")
-                            .scaleEffect(coverScale)
-                            .position(x: coverPosX, y: coverPosY)
-                            .opacity(originRect != nil ? 1 : (expanded ? 1 : 0))
+                            .scaleEffect(zoomCover ? (expanded ? 1.0 : 0.72) : 1.0)
+                            .opacity(expanded ? 1 : 0)
 
                             VStack(spacing: 6) {
                                 Text(track.title)
@@ -75,9 +59,8 @@ struct FocusModeView: View {
                                     .lineLimit(1)
                             }
                             .frame(maxWidth: max(artSize * 1.25, 360))
-                            .position(x: targetCenterX, y: targetCenterY + artSize / 2 + 54)
                             .opacity(expanded ? 1 : 0)
-                            .offset(y: (originRect != nil && !expanded) ? 14 : 0)
+                            .offset(y: (zoomCover && !expanded) ? 10 : 0)
                         }
                         .id(track.id)
                         .transition(
@@ -90,7 +73,8 @@ struct FocusModeView: View {
                     .frame(width: geo.size.width, height: geo.size.height)
                     .animation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.42), value: track.id)
                 }
-                .ignoresSafeArea()
+                .padding(.horizontal, 40)
+                .padding(.vertical, 36)
             }
 
             // Subtle exit button in top-right corner on hover
@@ -129,15 +113,15 @@ struct FocusModeView: View {
     }
 
     private func animate(to visible: Bool) {
-        if originRect != nil {
+        if zoomCover {
             withAnimation(visible
-                ? .spring(response: 0.36, dampingFraction: 0.86)
-                : .spring(response: 0.30, dampingFraction: 0.92)
+                ? .spring(response: 0.34, dampingFraction: 0.86)
+                : .easeInOut(duration: 0.22)
             ) {
                 expanded = visible
             }
         } else {
-            withAnimation(visible ? .easeOut(duration: 0.24) : .easeIn(duration: 0.20)) {
+            withAnimation(visible ? .easeOut(duration: 0.22) : .easeIn(duration: 0.18)) {
                 expanded = visible
             }
         }

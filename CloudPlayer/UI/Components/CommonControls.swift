@@ -202,38 +202,6 @@ struct LiquidSegmentedPicker<Option: Hashable & Identifiable>: View {
     }
 }
 
-/// Holds a weak reference to an AppKit `NSView` so we can query its exact top-left window rect on demand
-/// without triggering SwiftUI state updates during scrolling or resizing.
-@MainActor
-final class WindowFrameBox {
-    weak var view: NSView?
-
-    func rectInWindowTopLeft() -> CGRect? {
-        guard let view, let window = view.window else { return nil }
-        let winRect = view.convert(view.bounds, to: nil)
-        return CGRect(
-            x: winRect.origin.x,
-            y: window.frame.height - winRect.maxY,
-            width: winRect.width,
-            height: winRect.height
-        )
-    }
-}
-
-struct WindowFrameAnchor: NSViewRepresentable {
-    let box: WindowFrameBox
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        box.view = view
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        box.view = nsView
-    }
-}
-
 func formatTime(_ t: Double) -> String {
     guard t.isFinite, t > 0 else { return "0:00" }
     let total = Int(t.rounded())
