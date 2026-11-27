@@ -21,12 +21,20 @@ struct TrackDetailView: View {
     let track: SCTrack
     @Bindable var app: AppController
 
-    @State private var comments: [SCComment] = []
-    @State private var related: [SCTrack] = []
+    @State private var comments: [SCComment]
+    @State private var related: [SCTrack]
     @State private var isLoadingDetails = false
     @State private var narrowPane: TrackDetailPane = .comments
     @State private var commentSort: CommentSort = .newest
     @State private var descriptionExpanded = false
+
+    init(track: SCTrack, app: AppController) {
+        self.track = track
+        self.app = app
+        let cached = app.cachedTrackDetails(for: track.id)
+        self._comments = State(initialValue: cached?.comments ?? [])
+        self._related = State(initialValue: cached?.related ?? [])
+    }
 
     private var isCurrent: Bool { app.audio.currentTrack?.id == track.id }
     private var isPlayingThis: Bool { isCurrent && app.audio.isPlaying }
@@ -418,17 +426,18 @@ struct TrackDetailView: View {
     }
 
     private func loadDetails() async {
+        if let cached = app.cachedTrackDetails(for: track.id) {
+            comments = cached.comments
+            related = cached.related
+            app.prefetchAdjacentTracks()
+            return
+        }
         isLoadingDetails = true
         defer { isLoadingDetails = false }
-        async let relatedTask = app.api.fetchRelatedTracks(trackID: track.id, limit: 15)
-        async let commentsTask = app.api.fetchTrackComments(trackID: track.id, limit: 80)
-
-        if let r = try? await relatedTask {
-            related = r
-        }
-        if let c = try? await commentsTask {
-            comments = c.collection
-        }
+        let payload = await app.loadTrackDetails(for: track)
+        comments = payload.comments
+        related = payload.related
+        app.prefetchAdjacentTracks()
     }
 }
 

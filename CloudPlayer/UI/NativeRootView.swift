@@ -147,6 +147,16 @@ private struct NativeMainShell: View {
         .onReceive(NotificationCenter.default.publisher(for: .cpToggleSidebar)) { _ in
             toggleSidebar()
         }
+        .onChange(of: app.audio.currentTrack) { oldTrack, newTrack in
+            app.prefetchAdjacentTracks()
+            guard let newTrack,
+                  case .track(let viewingTrack) = app.router.current,
+                  viewingTrack.id != newTrack.id,
+                  oldTrack?.id == viewingTrack.id else { return }
+            withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.44)) {
+                app.router.replaceCurrent(with: .track(newTrack))
+            }
+        }
     }
 
     @ViewBuilder
@@ -171,7 +181,18 @@ private struct NativeMainShell: View {
         case .playlist(let playlist):
             CollectionDetailView(playlist: playlist, app: app)
         case .track(let track):
-            TrackDetailView(track: track, app: app)
+            let dir = app.audio.lastTransitionDirection
+            ZStack {
+                TrackDetailView(track: track, app: app)
+                    .id(track.id)
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: dir == .next ? .trailing : .leading).combined(with: .opacity),
+                            removal: .move(edge: dir == .next ? .leading : .trailing).combined(with: .opacity)
+                        )
+                    )
+            }
+            .clipped()
         case .user(let user):
             ProfileView(user: user, app: app)
         }

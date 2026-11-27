@@ -96,6 +96,12 @@ final class AppRouter {
         current = route
     }
 
+    /// Replaces the current route without adding a history entry (used when Track Detail follows Now Playing).
+    func replaceCurrent(with route: NativeRoute) {
+        guard route != current else { return }
+        current = route
+    }
+
     func selectSidebar(_ item: NativeSidebarItem) {
         navigate(to: item.route)
     }

@@ -3,12 +3,18 @@ import Foundation
 import Observation
 import OSLog
 
+enum TrackTransitionDirection: Equatable, Sendable {
+    case next
+    case previous
+}
+
 /// Native macOS audio playback engine backed by `AVPlayer` + `PlaybackQueue` + `NowPlayingBridge`.
 @MainActor
 @Observable
 final class AudioEngine {
     private(set) var queue = PlaybackQueue()
     private(set) var currentTrack: SCTrack?
+    private(set) var lastTransitionDirection: TrackTransitionDirection = .next
     private(set) var isPlaying = false
     private(set) var isBuffering = false
     private(set) var position: Double = 0
@@ -153,6 +159,7 @@ final class AudioEngine {
                 seek(seconds: 0)
                 play()
             } else {
+                lastTransitionDirection = .next
                 startTrack(nextTrack)
             }
         } else {
@@ -168,6 +175,7 @@ final class AudioEngine {
         case .restartCurrent:
             seek(seconds: 0)
         case .switchTo(let prev):
+            lastTransitionDirection = .previous
             startTrack(prev)
         }
     }
