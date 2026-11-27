@@ -254,8 +254,8 @@ struct TrackContextMenu: View {
         }
         if let url = track.permalinkURL {
             Divider()
-            Button("Share…", systemImage: "square.and.arrow.up") {
-                presentSharePickerAtCursor(url: url)
+            ContextShareSubmenu(url: url) {
+                app.showToast("Copied link")
             }
             Button("Open on SoundCloud", systemImage: "safari") {
                 NSWorkspace.shared.open(url)

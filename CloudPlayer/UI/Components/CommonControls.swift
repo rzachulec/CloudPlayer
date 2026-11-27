@@ -235,6 +235,39 @@ private struct ShareAnchorView: NSViewRepresentable {
     }
 }
 
+/// Inline `Share ▸` submenu for `.contextMenu` that keeps the parent context menu open while
+/// browsing and invoking native macOS sharing services right beside the menu item.
+struct ContextShareSubmenu: View {
+    let url: URL
+    var onCopied: (() -> Void)?
+
+    var body: some View {
+        Menu("Share", systemImage: "square.and.arrow.up") {
+            Button("Copy Link", systemImage: "link") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                onCopied?()
+            }
+
+            let services = NSSharingService.sharingServices(forItems: [url])
+            if !services.isEmpty {
+                Divider()
+                ForEach(services, id: \.title) { service in
+                    Button {
+                        service.perform(withItems: [url])
+                    } label: {
+                        Label {
+                            Text(service.menuItemTitle)
+                        } icon: {
+                            Image(nsImage: service.image)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Liquid Glass Share button that anchors `NSSharingServicePicker` directly to the button itself.
 struct NativeShareButton: View {
     let url: URL
