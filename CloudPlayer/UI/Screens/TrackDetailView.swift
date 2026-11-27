@@ -102,44 +102,47 @@ struct TrackDetailView: View {
     private func heroCard(containerSize: CGSize, minHeight: CGFloat) -> some View {
         let progress = isCurrent && app.audio.duration > 0 ? app.audio.position / app.audio.duration : 0
         let duration = isCurrent && app.audio.duration > 0 ? app.audio.duration : track.durationSeconds
-        let artSize = min(max(min(containerSize.width * 0.27, containerSize.height * 0.44), 170), 380)
-        let isLarge = artSize >= 270
+        let isShort = minHeight < 420
+        let artSize = min(max(min(containerSize.width * 0.25, minHeight * 0.42), 116), 360)
+        let isLarge = artSize >= 260 && !isShort
 
-        return VStack(alignment: .leading, spacing: 20) {
-            Spacer(minLength: 8)
+        return VStack(alignment: .leading, spacing: isShort ? 10 : 18) {
+            Spacer(minLength: 0)
 
-            HStack(alignment: .center, spacing: isLarge ? 32 : 22) {
+            HStack(alignment: .center, spacing: isLarge ? 32 : (isShort ? 16 : 22)) {
                 CachedArtwork(
                     url: track.resolvedArtworkURL(size: .large),
                     size: artSize,
-                    cornerRadius: isLarge ? 18 : 14
+                    cornerRadius: isLarge ? 18 : (isShort ? 10 : 14)
                 )
-                .shadow(color: .black.opacity(0.42), radius: isLarge ? 26 : 18, y: 10)
+                .shadow(color: .black.opacity(0.42), radius: isLarge ? 26 : 16, y: 8)
 
-                VStack(alignment: .leading, spacing: isLarge ? 10 : 8) {
-                    HStack(spacing: 6) {
-                        if let genre = track.genre, !genre.isEmpty {
-                            Text("#\(genre)")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 3)
-                                .background(.white.opacity(0.16), in: Capsule())
-                        }
-                        if track.isPreviewOnly {
-                            Text("Go+ Preview")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 3)
-                                .background(.orange.opacity(0.45), in: Capsule())
+                VStack(alignment: .leading, spacing: isLarge ? 10 : (isShort ? 5 : 8)) {
+                    if !isShort {
+                        HStack(spacing: 6) {
+                            if let genre = track.genre, !genre.isEmpty {
+                                Text("#\(genre)")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.92))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 3)
+                                    .background(.white.opacity(0.16), in: Capsule())
+                            }
+                            if track.isPreviewOnly {
+                                Text("Go+ Preview")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.92))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 3)
+                                    .background(.orange.opacity(0.45), in: Capsule())
+                            }
                         }
                     }
 
                     Text(track.title)
-                        .font(.system(size: isLarge ? 34 : 26, weight: .bold))
+                        .font(.system(size: isLarge ? 34 : (isShort ? 20 : 26), weight: .bold))
                         .foregroundStyle(.white)
-                        .lineLimit(2)
+                        .lineLimit(isShort ? 1 : 2)
 
                     Button {
                         if let user = track.user {
@@ -147,12 +150,13 @@ struct TrackDetailView: View {
                         }
                     } label: {
                         Text(track.artistName)
-                            .font(.system(size: isLarge ? 18 : 15, weight: .medium))
+                            .font(.system(size: isLarge ? 18 : (isShort ? 13 : 15), weight: .medium))
                             .foregroundStyle(.white.opacity(0.84))
+                            .lineLimit(1)
                     }
                     .buttonStyle(.plain)
 
-                    HStack(spacing: 16) {
+                    HStack(spacing: 14) {
                         if let plays = track.playbackCount {
                             Label(formatCompactCount(plays), systemImage: "play.fill")
                         }
@@ -164,17 +168,17 @@ struct TrackDetailView: View {
                         }
                         Label(formatTime(duration), systemImage: "clock")
                     }
-                    .font(.system(size: 12).monospacedDigit())
+                    .font(.system(size: isShort ? 11 : 12).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.76))
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         Button {
                             app.audio.play(track: track, inContext: [track] + related, contextTitle: track.title)
                         } label: {
                             Label(isPlayingThis ? "Pause" : "Play", systemImage: isPlayingThis ? "pause.fill" : "play.fill")
                         }
                         .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+                        .controlSize(isShort ? .regular : .large)
 
                         Button {
                             app.toggleLike(track)
@@ -182,7 +186,7 @@ struct TrackDetailView: View {
                             Label(isLiked ? "Liked" : "Like", systemImage: isLiked ? "heart.fill" : "heart")
                         }
                         .buttonStyle(.bordered)
-                        .controlSize(.large)
+                        .controlSize(isShort ? .regular : .large)
                         .tint(isLiked ? .accentColor : .white)
 
                         if let url = track.permalinkURL {
@@ -190,16 +194,16 @@ struct TrackDetailView: View {
                                 Label("Share", systemImage: "square.and.arrow.up")
                             }
                             .buttonStyle(.bordered)
-                            .controlSize(.large)
+                            .controlSize(isShort ? .regular : .large)
                             .tint(.white)
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, isShort ? 2 : 4)
                 }
                 Spacer(minLength: 0)
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 0)
 
             // Large interactive waveform + timed avatar comment pins
             VStack(alignment: .leading, spacing: 0) {
@@ -207,7 +211,7 @@ struct TrackDetailView: View {
                     url: track.waveformURL,
                     progress: progress,
                     isActive: isCurrent,
-                    height: 82
+                    height: isShort ? 52 : 78
                 ) { fraction in
                     if isCurrent {
                         app.audio.seek(fraction: fraction)
@@ -234,23 +238,25 @@ struct TrackDetailView: View {
                 )
             }
 
-            HStack {
-                Spacer()
-                HStack(spacing: 5) {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("Scroll for comments & related tracks")
-                        .font(.system(size: 11, weight: .medium))
+            if !isShort {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Scroll for comments & related tracks")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.55))
+                    Spacer()
                 }
-                .foregroundStyle(.white.opacity(0.55))
-                Spacer()
+                .padding(.top, 2)
             }
-            .padding(.top, 2)
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 24)
-        .padding(.bottom, 18)
-        .frame(minHeight: minHeight)
+        .padding(.horizontal, isShort ? 18 : 26)
+        .padding(.vertical, isShort ? 14 : 20)
+        .frame(height: minHeight)
+        .transaction { $0.animation = nil }
         .background {
             LazyImage(url: track.resolvedArtworkURL(size: .large)) { state in
                 if let image = state.image {
@@ -592,8 +598,16 @@ private struct WaveformCommentsStrip: View {
                         .background(
                             GeometryReader { pillGeo in
                                 Color.clear
-                                    .onAppear { pillWidth = pillGeo.size.width }
-                                    .onChange(of: pillGeo.size.width) { _, newW in pillWidth = newW }
+                                    .onAppear {
+                                        if abs(pillGeo.size.width - pillWidth) > 2 {
+                                            pillWidth = pillGeo.size.width
+                                        }
+                                    }
+                                    .onChange(of: pillGeo.size.width) { _, newW in
+                                        if abs(newW - pillWidth) > 2 {
+                                            pillWidth = newW
+                                        }
+                                    }
                             }
                         )
                         .offset(x: clampedX)
