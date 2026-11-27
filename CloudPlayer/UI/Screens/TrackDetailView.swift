@@ -29,6 +29,7 @@ struct TrackDetailView: View {
     @State private var narrowPane: TrackDetailPane = .comments
     @State private var commentSort: CommentSort = .newest
     @State private var descriptionExpanded = false
+    @State private var coverFrameBox = WindowFrameBox()
 
     init(track: SCTrack, app: AppController) {
         self.track = track
@@ -103,23 +104,21 @@ struct TrackDetailView: View {
 
         return VStack(alignment: .leading, spacing: isCompact ? 14 : 18) {
             HStack(alignment: .center, spacing: isCompact ? 16 : 22) {
-                GeometryReader { coverGeo in
-                    Button {
-                        let rect = coverGeo.frame(in: .global)
-                        app.enterFocusMode(track: track, originRect: rect)
-                    } label: {
-                        CachedArtwork(
-                            url: track.resolvedArtworkURL(size: .large),
-                            size: artSize,
-                            cornerRadius: isCompact ? 12 : 14
-                        )
-                        .shadow(color: .black.opacity(0.42), radius: 18, y: 8)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Enter Focus Mode")
-                    .opacity(app.focusTrack?.id == track.id && app.focusOriginRect != nil ? 0 : 1)
+                Button {
+                    let rect = coverFrameBox.rectInWindowTopLeft()
+                    app.enterFocusMode(track: track, originRect: rect)
+                } label: {
+                    CachedArtwork(
+                        url: track.resolvedArtworkURL(size: .large),
+                        size: artSize,
+                        cornerRadius: isCompact ? 12 : 14
+                    )
+                    .shadow(color: .black.opacity(0.42), radius: 18, y: 8)
                 }
-                .frame(width: artSize, height: artSize)
+                .buttonStyle(.plain)
+                .background(WindowFrameAnchor(box: coverFrameBox))
+                .help("Enter Focus Mode")
+                .opacity(app.focusTrack?.id == track.id && app.focusOriginRect != nil ? 0 : 1)
 
                 VStack(alignment: .leading, spacing: isCompact ? 6 : 8) {
                     HStack(spacing: 6) {
