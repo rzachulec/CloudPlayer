@@ -105,6 +105,8 @@ private struct NativeMainShell: View {
                 .animation(.easeOut(duration: 0.22), value: app.audio.queueVisible)
             }
             .frame(minWidth: 560, minHeight: 440)
+            .navigationTitle(app.isFocusMode ? "" : "CloudPlayer")
+            .toolbarBackground(app.isFocusMode ? .hidden : .automatic, for: .windowToolbar)
             .toolbar {
                 if !app.isFocusMode {
                     ToolbarItemGroup(placement: .navigation) {
@@ -154,9 +156,10 @@ private struct NativeMainShell: View {
         }
         .onChange(of: app.isFocusMode) { _, focused in
             if let window = NSApp.windows.first(where: { $0.frameAutosaveName == "MainWindowNative" }) ?? NSApp.mainWindow {
-                window.toolbar?.isVisible = !focused
+                // Keep toolbar.isVisible = true so the underlying ScrollView safe-area inset never shifts/jumps.
                 window.titlebarAppearsTransparent = focused
                 window.titleVisibility = .hidden
+                window.toolbar?.showsBaselineSeparator = !focused
             }
         }
 
