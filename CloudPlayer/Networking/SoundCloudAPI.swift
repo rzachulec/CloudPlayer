@@ -283,6 +283,28 @@ actor SoundCloudAPI {
         )
     }
 
+    func fetchUserFollowers(userID: Int, limit: Int = 50, nextHref: String? = nil) async throws -> SCCollectionPage<SCUser> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/users/\(userID)/followers",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func fetchUserReposts(userID: Int, limit: Int = 30, nextHref: String? = nil) async throws -> SCCollectionPage<SCRepostItem> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/stream/users/\(userID)/reposts",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
     // MARK: - Track Detail & Profile Endpoints
 
     func fetchTrackComments(trackID: Int, limit: Int = 40, nextHref: String? = nil) async throws -> SCCollectionPage<SCComment> {

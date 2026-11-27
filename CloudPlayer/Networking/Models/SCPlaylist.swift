@@ -263,6 +263,21 @@ struct SCHistoryItem: Codable, Sendable {
     }
 }
 
+/// Wrapper for `/stream/users/{id}/reposts` entries.
+struct SCRepostItem: Codable, Sendable {
+    let type: String?
+    let createdAt: String?
+    let track: SCTrack?
+    let playlist: SCPlaylist?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case createdAt = "created_at"
+        case track
+        case playlist
+    }
+}
+
 /// Wrapper for `/me/library/all` entries (playlists, albums, system playlists).
 struct SCLibraryItem: Codable, Sendable {
     let type: String?

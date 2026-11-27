@@ -7,14 +7,18 @@ enum ProfileDrilldownSection: String, Identifiable {
     case tracks = "Tracks"
     case albums = "Albums"
     case playlists = "Playlists"
+    case reposts = "Reposts"
     case likes = "Likes"
+    case following = "Following"
+    case followers = "Followers"
 
     var id: Self { self }
 }
 
 /// Apple Music–style native Artist / User Profile:
-/// - Full-width banner hero card (artist's SoundCloud banner visual or blurred avatar fallback)
-/// - Overview with curated vertical shelves and `"Title ›"` drill-downs (no underline tab bar)
+/// - Full-width banner hero card with clickable stat pills (Followers, Following, Likes, Tracks, Playlists)
+/// - Curated vertical overview shelves (`Popular Tracks ›`, `Albums ›`, `Tracks ›`, `Playlists ›`,
+///   `Reposts ›`, `Likes ›`, `Following ›`, `Followers ›`)
 /// - Drill-down sub-pages with `"‹ Artist · Section"` back header.
 struct ProfileView: View {
     let initialUser: SCUser
@@ -26,10 +30,14 @@ struct ProfileView: View {
     @State private var allTracks: [SCTrack] = []
     @State private var albums: [SCPlaylist] = []
     @State private var playlists: [SCPlaylist] = []
+    @State private var repostTracks: [SCTrack] = []
     @State private var likedTracks: [SCTrack] = []
+    @State private var followingUsers: [SCUser] = []
+    @State private var followerUsers: [SCUser] = []
     @State private var isLoading = false
 
     private let gridColumns = [GridItem(.adaptive(minimum: 165, maximum: 220), spacing: 18)]
+    private let userGridColumns = [GridItem(.adaptive(minimum: 155, maximum: 205), spacing: 16)]
 
     init(user: SCUser, app: AppController) {
         self.initialUser = user
@@ -79,7 +87,7 @@ struct ProfileView: View {
             .overlay(Circle().strokeBorder(.white.opacity(0.28), lineWidth: 1.5))
             .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Text(user.displayName)
                         .font(.system(size: 28, weight: .bold))
@@ -93,25 +101,46 @@ struct ProfileView: View {
                 }
 
                 let loc = [user.city, user.countryCode].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
-                HStack(spacing: 12) {
-                    if !loc.isEmpty { Text(loc) }
-                    if let f = user.followersCount { Text("\(formatCompactCount(f)) followers") }
-                    if let fg = user.followingsCount { Text("\(formatCompactCount(fg)) following") }
-                    if let t = user.trackCount { Text("\(t) tracks") }
+                if !loc.isEmpty {
+                    Text(loc)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.8))
                 }
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.82))
 
                 if let bio = user.description?.trimmingCharacters(in: .whitespacesAndNewlines), !bio.isEmpty {
                     Text(bio)
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.76))
                         .lineLimit(2)
-                        .padding(.top, 1)
                 }
 
+                // Clickable stat pills (Followers, Following, Likes, Tracks, Playlists)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 7) {
+                        if let f = user.followersCount {
+                            statPill(icon: "person.fill", label: "\(formatCompactCount(f)) Followers", section: .followers)
+                        }
+                        if let fg = user.followingsCount {
+                            statPill(icon: "person.2.fill", label: "\(formatCompactCount(fg)) Following", section: .following)
+                        }
+                        if let lk = user.likesCount, lk > 0 {
+                            statPill(icon: "heart.fill", label: "\(formatCompactCount(lk)) Likes", section: .likes)
+                        }
+                        if let t = user.trackCount, t > 0 {
+                            statPill(icon: "waveform", label: "\(t) Tracks", section: .tracks)
+                        }
+                        if let pl = user.playlistCount, pl > 0 {
+                            statPill(icon: "music.note.list", label: "\(pl) Playlists", section: .playlists)
+                        }
+                        if !repostTracks.isEmpty {
+                            statPill(icon: "arrow.2.squarepath", label: "\(repostTracks.count) Reposts", section: .reposts)
+                        }
+                    }
+                }
+                .padding(.top, 2)
+
                 HStack(spacing: 8) {
-                    let playList = popularTracks.isEmpty ? allTracks : popularTracks
+                    let playList = popularTracks.isEmpty ? (allTracks.isEmpty ? likedTracks : allTracks) : popularTracks
                     if !playList.isEmpty {
                         Button {
                             app.audio.play(track: playList[0], inContext: playList, contextTitle: user.displayName)
@@ -141,6 +170,17 @@ struct ProfileView: View {
 
                     if let url = user.permalinkURL {
                         Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                            app.showToast("Copied profile link")
+                        } label: {
+                            Image(systemName: "link")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white)
+                        .help("Copy Profile Link")
+
+                        Button {
                             NSWorkspace.shared.open(url)
                         } label: {
                             Image(systemName: "safari")
@@ -150,13 +190,13 @@ struct ProfileView: View {
                         .help("Open on SoundCloud")
                     }
                 }
-                .padding(.top, 4)
+                .padding(.top, 3)
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 22)
-        .frame(minHeight: 205, alignment: .bottomLeading)
+        .frame(minHeight: 215, alignment: .bottomLeading)
         .background {
             if let banner = user.bannerURL {
                 LazyImage(url: banner) { state in
@@ -168,7 +208,7 @@ struct ProfileView: View {
                 }
                 .overlay(
                     LinearGradient(
-                        colors: [.black.opacity(0.18), .black.opacity(0.72)],
+                        colors: [.black.opacity(0.18), .black.opacity(0.75)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -184,6 +224,25 @@ struct ProfileView: View {
         )
     }
 
+    private func statPill(icon: String, label: String, section: ProfileDrilldownSection) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.16)) { drilldown = section }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+            }
+            .foregroundStyle(.white.opacity(0.92))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(.white.opacity(0.16), in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var blurredAvatarBackdrop: some View {
         LazyImage(url: user.avatarURL(size: .large)) { state in
             if let image = state.image {
@@ -196,7 +255,7 @@ struct ProfileView: View {
         .scaleEffect(1.3)
         .overlay(
             LinearGradient(
-                colors: [.black.opacity(0.28), .black.opacity(0.65)],
+                colors: [.black.opacity(0.28), .black.opacity(0.68)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -207,7 +266,7 @@ struct ProfileView: View {
 
     @ViewBuilder
     private var overviewShelves: some View {
-        if isLoading && popularTracks.isEmpty && allTracks.isEmpty && albums.isEmpty && playlists.isEmpty {
+        if isLoading && popularTracks.isEmpty && allTracks.isEmpty && albums.isEmpty && playlists.isEmpty && likedTracks.isEmpty {
             LazyVStack(spacing: 6) {
                 ForEach(0..<8, id: \.self) { _ in TrackRowSkeleton() }
             }
@@ -216,9 +275,7 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     sectionHeader(.popular, count: popularTracks.count)
                     LazyVStack(spacing: 2) {
-                        ForEach(popularTracks.prefix(5)) { track in
-                            trackRow(track, context: popularTracks)
-                        }
+                        ForEach(popularTracks.prefix(5)) { trackRow($0, context: popularTracks) }
                     }
                 }
             }
@@ -241,9 +298,7 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     sectionHeader(.tracks, count: allTracks.count)
                     LazyVStack(spacing: 2) {
-                        ForEach(allTracks.prefix(5)) { track in
-                            trackRow(track, context: allTracks)
-                        }
+                        ForEach(allTracks.prefix(5)) { trackRow($0, context: allTracks) }
                     }
                 }
             }
@@ -262,13 +317,54 @@ struct ProfileView: View {
                 }
             }
 
+            if !repostTracks.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionHeader(.reposts, count: repostTracks.count)
+                    LazyVStack(spacing: 2) {
+                        ForEach(repostTracks.prefix(5)) { trackRow($0, context: repostTracks) }
+                    }
+                }
+            }
+
             if !likedTracks.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    sectionHeader(.likes, count: likedTracks.count)
+                    sectionHeader(.likes, count: user.likesCount ?? likedTracks.count)
                     LazyVStack(spacing: 2) {
-                        ForEach(likedTracks.prefix(5)) { track in
-                            trackRow(track, context: likedTracks)
+                        ForEach(likedTracks.prefix(5)) { trackRow($0, context: likedTracks) }
+                    }
+                }
+            }
+
+            if !followingUsers.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionHeader(.following, count: user.followingsCount ?? followingUsers.count)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 14) {
+                            ForEach(followingUsers.prefix(12)) { artist in
+                                UserCard(user: artist) {
+                                    app.router.navigate(to: .user(artist))
+                                }
+                                .frame(width: 152)
+                            }
                         }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
+            if !followerUsers.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionHeader(.followers, count: user.followersCount ?? followerUsers.count)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 14) {
+                            ForEach(followerUsers.prefix(12)) { follower in
+                                UserCard(user: follower) {
+                                    app.router.navigate(to: .user(follower))
+                                }
+                                .frame(width: 152)
+                            }
+                        }
+                        .padding(.vertical, 2)
                     }
                 }
             }
@@ -343,17 +439,13 @@ struct ProfileView: View {
 
         switch section {
         case .popular:
-            LazyVStack(spacing: 2) {
-                ForEach(popularTracks) { trackRow($0, context: popularTracks) }
-            }
+            LazyVStack(spacing: 2) { ForEach(popularTracks) { trackRow($0, context: popularTracks) } }
         case .tracks:
-            LazyVStack(spacing: 2) {
-                ForEach(allTracks) { trackRow($0, context: allTracks) }
-            }
+            LazyVStack(spacing: 2) { ForEach(allTracks) { trackRow($0, context: allTracks) } }
+        case .reposts:
+            LazyVStack(spacing: 2) { ForEach(repostTracks) { trackRow($0, context: repostTracks) } }
         case .likes:
-            LazyVStack(spacing: 2) {
-                ForEach(likedTracks) { trackRow($0, context: likedTracks) }
-            }
+            LazyVStack(spacing: 2) { ForEach(likedTracks) { trackRow($0, context: likedTracks) } }
         case .albums:
             LazyVGrid(columns: gridColumns, spacing: 20) {
                 ForEach(albums, id: \.stableID) { PlaylistCard(playlist: $0, app: app) }
@@ -362,6 +454,18 @@ struct ProfileView: View {
             LazyVGrid(columns: gridColumns, spacing: 20) {
                 ForEach(playlists, id: \.stableID) { PlaylistCard(playlist: $0, app: app) }
             }
+        case .following:
+            LazyVGrid(columns: userGridColumns, spacing: 18) {
+                ForEach(followingUsers) { artist in
+                    UserCard(user: artist) { app.router.navigate(to: .user(artist)) }
+                }
+            }
+        case .followers:
+            LazyVGrid(columns: userGridColumns, spacing: 18) {
+                ForEach(followerUsers) { follower in
+                    UserCard(user: follower) { app.router.navigate(to: .user(follower)) }
+                }
+            }
         }
     }
 
@@ -369,8 +473,9 @@ struct ProfileView: View {
         switch section {
         case .popular: popularTracks
         case .tracks: allTracks
+        case .reposts: repostTracks
         case .likes: likedTracks
-        case .albums, .playlists: nil
+        case .albums, .playlists, .following, .followers: nil
         }
     }
 
@@ -402,13 +507,19 @@ struct ProfileView: View {
         async let tracksTask = app.api.fetchUserTracks(userID: uid, limit: 40)
         async let albumsTask = app.api.fetchUserAlbums(userID: uid, limit: 30)
         async let playlistsTask = app.api.fetchUserOwnPlaylists(userID: uid, limit: 30)
-        async let likesTask = app.api.fetchTrackLikes(userID: uid, limit: 30)
+        async let repostsTask = app.api.fetchUserReposts(userID: uid, limit: 30)
+        async let likesTask = app.api.fetchTrackLikes(userID: uid, limit: 40)
+        async let followingTask = app.api.fetchUserFollowings(userID: uid, limit: 40)
+        async let followersTask = app.api.fetchUserFollowers(userID: uid, limit: 40)
 
         if let full = try? await userTask { user = full }
         if let pop = try? await popularTask { popularTracks = pop }
         if let tr = try? await tracksTask { allTracks = tr.collection }
         if let alb = try? await albumsTask { albums = alb.collection }
         if let pls = try? await playlistsTask { playlists = pls }
+        if let rep = try? await repostsTask { repostTracks = rep.collection.compactMap(\.track) }
         if let lk = try? await likesTask { likedTracks = lk.collection.compactMap(\.track) }
+        if let fg = try? await followingTask { followingUsers = fg.collection }
+        if let fl = try? await followersTask { followerUsers = fl.collection }
     }
 }
