@@ -173,15 +173,10 @@ struct LibraryCollectionsView: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.arrow.down").font(.system(size: 10.5))
-                        Text(sortOrder.rawValue).font(.system(size: 11.5, weight: .medium))
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(height: 28)
-                    .liquidGlassCapsule(interactive: true)
+                    Label(sortOrder.rawValue, systemImage: "arrow.up.arrow.down")
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .liquidGlassButton()
                 .fixedSize()
 
                 // Tiles / List toggle
@@ -197,24 +192,12 @@ struct LibraryCollectionsView: View {
             }
 
             if kind == .playlists {
-                HStack(spacing: 6) {
-                    ForEach(CollectionFilter.allCases) { f in
-                        let selected = ownershipFilter == f
-                        Button {
-                            withAnimation(.easeOut(duration: 0.15)) { ownershipFilter = f }
-                        } label: {
-                            Text(f.rawValue)
-                                .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
-                                .foregroundStyle(selected ? Color.white : Color.primary)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule().fill(selected ? Color.accentColor : Color.primary.opacity(0.08))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                LiquidSegmentedPicker(
+                    options: CollectionFilter.allCases,
+                    selection: $ownershipFilter,
+                    title: \.rawValue,
+                    compact: true
+                )
             }
         }
     }

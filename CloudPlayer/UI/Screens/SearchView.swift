@@ -153,19 +153,16 @@ struct SearchView: View {
                 }
             }
 
-            Picker("Scope", selection: $scope) {
-                ForEach(SearchScope.allCases) { s in
-                    Text(s.rawValue).tag(s)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 360)
+            LiquidSegmentedPicker(
+                options: SearchScope.allCases,
+                selection: $scope,
+                title: \.rawValue
+            )
         }
     }
 
     private var trackFiltersBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Menu {
                     ForEach(SearchCreatedFilter.allCases) { option in
@@ -180,13 +177,11 @@ struct SearchView: View {
                         }
                     }
                 } label: {
-                    filterPillLabel(
-                        icon: "calendar",
-                        title: createdFilter == .any ? "Added" : createdFilter.label,
-                        active: createdFilter != .any
-                    )
+                    Label(createdFilter == .any ? "Added" : createdFilter.label, systemImage: "calendar")
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .liquidGlassButton(prominent: createdFilter != .any)
+                .controlSize(.small)
                 .fixedSize()
 
                 Menu {
@@ -202,13 +197,11 @@ struct SearchView: View {
                         }
                     }
                 } label: {
-                    filterPillLabel(
-                        icon: "clock",
-                        title: durationFilter == .any ? "Length" : durationFilter.label,
-                        active: durationFilter != .any
-                    )
+                    Label(durationFilter == .any ? "Length" : durationFilter.label, systemImage: "clock")
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .liquidGlassButton(prominent: durationFilter != .any)
+                .controlSize(.small)
                 .fixedSize()
 
                 Menu {
@@ -224,13 +217,11 @@ struct SearchView: View {
                         }
                     }
                 } label: {
-                    filterPillLabel(
-                        icon: "doc.text",
-                        title: licenseFilter == .any ? "License" : licenseFilter.label,
-                        active: licenseFilter != .any
-                    )
+                    Label(licenseFilter == .any ? "License" : licenseFilter.label, systemImage: "doc.text")
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .liquidGlassButton(prominent: licenseFilter != .any)
+                .controlSize(.small)
                 .fixedSize()
 
                 if hasActiveTrackFilters {
@@ -240,8 +231,8 @@ struct SearchView: View {
                         durationFilter = .any
                         licenseFilter = .any
                     }
-                    .buttonStyle(.link)
-                    .font(.system(size: 11.5))
+                    .liquidGlassButton()
+                    .controlSize(.small)
                 }
                 Spacer()
             }
@@ -256,34 +247,15 @@ struct SearchView: View {
                             } label: {
                                 Text("#\(facet.value)")
                                     .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
-                                    .foregroundStyle(isSelected ? Color.white : Color.primary)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        Capsule().fill(isSelected ? Color.accentColor : Color.primary.opacity(0.08))
-                                    )
                             }
-                            .buttonStyle(.plain)
+                            .liquidGlassButton(prominent: isSelected)
+                            .controlSize(.small)
                         }
                     }
-                    .padding(.vertical, 1)
+                    .padding(.vertical, 2)
                 }
             }
         }
-    }
-
-    private func filterPillLabel(icon: String, title: String, active: Bool) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 10.5))
-            Text(title).font(.system(size: 11.5, weight: active ? .semibold : .medium))
-            Image(systemName: "chevron.down").font(.system(size: 8.5, weight: .semibold))
-        }
-        .foregroundStyle(active ? Color.accentColor : Color.primary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(
-            Capsule().fill(active ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.07))
-        )
     }
 
     @ViewBuilder

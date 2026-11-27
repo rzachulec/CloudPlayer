@@ -157,6 +157,51 @@ struct LiquidIconPicker<Option: Hashable & Identifiable>: View {
     }
 }
 
+/// Concentric capsule text segmented picker with a sliding thumb for macOS 26/27 Liquid Glass.
+struct LiquidSegmentedPicker<Option: Hashable & Identifiable>: View {
+    let options: [Option]
+    @Binding var selection: Option
+    let title: (Option) -> String
+    var compact: Bool = false
+
+    @Namespace private var thumbNamespace
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options) { option in
+                let isSelected = selection == option
+                Button {
+                    withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                        selection = option
+                    }
+                } label: {
+                    Text(title(option))
+                        .font(.system(size: compact ? 11.5 : 12, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                        .padding(.horizontal, compact ? 10 : 13)
+                        .frame(height: compact ? 20 : 22)
+                        .background {
+                            if isSelected {
+                                Capsule()
+                                    .fill(Color.primary.opacity(0.14))
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
+                                    )
+                                    .matchedGeometryEffect(id: "liquidSegmentedThumb", in: thumbNamespace)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .frame(height: compact ? 26 : 28)
+        .liquidGlassCapsule(interactive: false)
+    }
+}
+
 func formatTime(_ t: Double) -> String {
     guard t.isFinite, t > 0 else { return "0:00" }
     let total = Int(t.rounded())

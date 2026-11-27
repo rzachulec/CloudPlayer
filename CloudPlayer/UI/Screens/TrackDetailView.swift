@@ -70,14 +70,11 @@ struct TrackDetailView: View {
                         }
                     } else {
                         aboutSection
-                        Picker("Section", selection: $narrowPane) {
-                            ForEach(TrackDetailPane.allCases) { p in
-                                Text(p.rawValue).tag(p)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .frame(maxWidth: 280)
+                        LiquidSegmentedPicker(
+                            options: TrackDetailPane.allCases,
+                            selection: $narrowPane,
+                            title: \.rawValue
+                        )
 
                         switch narrowPane {
                         case .comments: commentsSection
@@ -302,13 +299,12 @@ struct TrackDetailView: View {
                 }
                 Spacer()
                 if comments.count > 1 {
-                    Picker("Sort", selection: $commentSort) {
-                        ForEach(CommentSort.allCases) { s in Text(s.rawValue).tag(s) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .frame(width: 156)
+                    LiquidSegmentedPicker(
+                        options: CommentSort.allCases,
+                        selection: $commentSort,
+                        title: \.rawValue,
+                        compact: true
+                    )
                 }
             }
 
