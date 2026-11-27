@@ -39,14 +39,14 @@ struct NativePlayerBar: View {
     var body: some View {
         let audio = app.audio
         let track = audio.currentTrack
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             transport(audio)
             nowPlaying(audio: audio, track: track)
-                .frame(minWidth: 220, maxWidth: .infinity)
+                .frame(minWidth: 120, maxWidth: .infinity)
             trailing(audio: audio, track: track)
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 12)
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
         .frame(height: Self.height)
         .frame(maxWidth: 760)
         .modifier(NativeCapsuleGlass())

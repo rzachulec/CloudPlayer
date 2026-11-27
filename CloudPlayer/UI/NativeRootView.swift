@@ -63,7 +63,7 @@ private struct NativeMainShell: View {
                 }
             }
             .animation(.spring(duration: 0.32), value: app.toast)
-            .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
+            .navigationSplitViewColumnWidth(min: 145, ideal: 165, max: 220)
         } detail: {
             ZStack(alignment: .bottom) {
                 HStack(spacing: 0) {
@@ -89,12 +89,12 @@ private struct NativeMainShell: View {
                     }
                     NativePlayerBar(app: app, onMini: onMini)
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 16)
                 .padding(.bottom, 14)
                 .padding(.trailing, app.audio.queueVisible ? 320 : 0)
                 .animation(.easeOut(duration: 0.22), value: app.audio.queueVisible)
             }
-            .frame(minWidth: 740, minHeight: 440)
+            .frame(minWidth: 560, minHeight: 440)
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button(action: toggleSidebar) {
@@ -119,7 +119,7 @@ private struct NativeMainShell: View {
                     ToolbarSearchField(prompt: "Search SoundCloud") { query in
                         app.router.search(query)
                     }
-                    .frame(width: 340)
+                    .frame(minWidth: 160, idealWidth: 260, maxWidth: 340)
                 }
                 if #available(macOS 26.0, *) {
                     ToolbarSpacer(.flexible)
