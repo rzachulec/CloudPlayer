@@ -160,13 +160,12 @@ private struct NativeMainShell: View {
             }
         }
 
-            if app.isFocusMode {
+            if app.focusTrack != nil {
                 FocusModeView(app: app)
-                    .transition(.opacity)
                     .zIndex(100)
             }
         }
-        .animation(.easeOut(duration: 0.22), value: app.isFocusMode)
+        .coordinateSpace(name: "cpRootWindow")
     }
 
     @ViewBuilder

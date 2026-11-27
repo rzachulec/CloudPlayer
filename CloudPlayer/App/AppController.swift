@@ -25,16 +25,30 @@ final class AppController {
     private(set) var lastError: String?
     var toast: NativeToast?
     var focusTrack: SCTrack?
+    var isFocusVisible = false
+    var focusOriginRect: CGRect?
+    private var focusExitTask: Task<Void, Never>?
 
-    var isFocusMode: Bool { focusTrack != nil }
+    var isFocusMode: Bool { isFocusVisible }
 
-    func enterFocusMode(track: SCTrack? = nil) {
+    func enterFocusMode(track: SCTrack? = nil, originRect: CGRect? = nil) {
         guard let target = track ?? audio.currentTrack else { return }
+        focusExitTask?.cancel()
         focusTrack = target
+        focusOriginRect = originRect
+        isFocusVisible = true
     }
 
     func exitFocusMode() {
-        focusTrack = nil
+        guard isFocusVisible else { return }
+        isFocusVisible = false
+        focusExitTask?.cancel()
+        focusExitTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(340))
+            guard !Task.isCancelled, let self, !self.isFocusVisible else { return }
+            self.focusTrack = nil
+            self.focusOriginRect = nil
+        }
     }
 
     /// Tight sliding-window cache for timed comments (only keeps [previous, current, next, viewing]).

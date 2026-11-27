@@ -103,18 +103,23 @@ struct TrackDetailView: View {
 
         return VStack(alignment: .leading, spacing: isCompact ? 14 : 18) {
             HStack(alignment: .center, spacing: isCompact ? 16 : 22) {
-                Button {
-                    app.enterFocusMode(track: track)
-                } label: {
-                    CachedArtwork(
-                        url: track.resolvedArtworkURL(size: .large),
-                        size: artSize,
-                        cornerRadius: isCompact ? 12 : 14
-                    )
-                    .shadow(color: .black.opacity(0.42), radius: 18, y: 8)
+                GeometryReader { coverGeo in
+                    Button {
+                        let rect = coverGeo.frame(in: .named("cpRootWindow"))
+                        app.enterFocusMode(track: track, originRect: rect)
+                    } label: {
+                        CachedArtwork(
+                            url: track.resolvedArtworkURL(size: .large),
+                            size: artSize,
+                            cornerRadius: isCompact ? 12 : 14
+                        )
+                        .shadow(color: .black.opacity(0.42), radius: 18, y: 8)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Enter Focus Mode")
+                    .opacity(app.focusTrack?.id == track.id && app.focusOriginRect != nil ? 0 : 1)
                 }
-                .buttonStyle(.plain)
-                .help("Enter Focus Mode")
+                .frame(width: artSize, height: artSize)
 
                 VStack(alignment: .leading, spacing: isCompact ? 6 : 8) {
                     HStack(spacing: 6) {
