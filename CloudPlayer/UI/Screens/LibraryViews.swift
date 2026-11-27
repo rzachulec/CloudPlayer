@@ -106,13 +106,18 @@ struct LibraryCollectionsView: View {
             let page = try await libTask
             let ownPlaylists = await ownTask
             let ownByID = Dictionary(uniqueKeysWithValues: ownPlaylists.compactMap { pl in pl.id.map { ($0, pl) } })
+            let priorByID = Dictionary(uniqueKeysWithValues: items.compactMap { pl in pl.id.map { ($0, pl) } })
 
             var merged: [SCPlaylist] = page.collection
                 .filter(matchesKind)
                 .compactMap(\.resolvedPlaylist)
                 .map { pl in
-                    if let id = pl.id, let detailed = ownByID[id] {
+                    guard let id = pl.id else { return pl }
+                    if let detailed = ownByID[id] {
                         return pl.mergingTracks(from: detailed)
+                    }
+                    if let prior = priorByID[id] {
+                        return pl.mergingTracks(from: prior)
                     }
                     return pl
                 }
@@ -123,35 +128,43 @@ struct LibraryCollectionsView: View {
                 merged.append(own)
             }
 
+            // Hydrate any remaining coverless liked playlists concurrently before committing
+            merged = await hydrateMissingCovers(in: merged)
             items = merged
             nextHref = page.nextHref
             await app.cache.save(merged, key: cacheKey)
-
-            // Hydrate coverless liked playlists in the background so they also show first-track artwork
-            await hydrateMissingCovers(in: merged)
         } catch {
             if items.isEmpty { errorMessage = error.localizedDescription }
         }
     }
 
-    private func hydrateMissingCovers(in playlists: [SCPlaylist]) async {
-        let missing = playlists.filter {
-            $0.artworkURL == nil && $0.calculatedArtworkURL == nil && $0.hydratedTracks.isEmpty && $0.id != nil
+    private func hydrateMissingCovers(in playlists: [SCPlaylist]) async -> [SCPlaylist] {
+        let missingIDs = playlists.compactMap { pl -> Int? in
+            guard pl.artworkURL == nil,
+                  pl.calculatedArtworkURL == nil,
+                  pl.hydratedTracks.isEmpty,
+                  let id = pl.id else { return nil }
+            return id
         }.prefix(12)
-        guard !missing.isEmpty else { return }
+        guard !missingIDs.isEmpty else { return playlists }
 
-        var updated = items
-        var changed = false
-        for pl in missing {
-            guard let id = pl.id, let detailed = try? await app.api.fetchPlaylist(id: id) else { continue }
-            if let idx = updated.firstIndex(where: { $0.id == id }) {
-                updated[idx] = updated[idx].mergingTracks(from: detailed)
-                changed = true
+        let api = app.api
+        let detailedByID: [Int: SCPlaylist] = await withTaskGroup(of: (Int, SCPlaylist?).self) { group in
+            for id in missingIDs {
+                group.addTask { (id, try? await api.fetchPlaylist(id: id)) }
             }
+            var out: [Int: SCPlaylist] = [:]
+            for await (id, pl) in group {
+                if let pl { out[id] = pl }
+            }
+            return out
         }
-        if changed {
-            items = updated
-            await app.cache.save(updated, key: cacheKey)
+
+        return playlists.map { pl in
+            if let id = pl.id, let detailed = detailedByID[id] {
+                return pl.mergingTracks(from: detailed)
+            }
+            return pl
         }
     }
 
@@ -173,13 +186,11 @@ struct LibraryCollectionsView: View {
     }
 }
 
-/// Native Stations / Radio view combining liked stations (`system-playlist-like`) and
-/// SoundCloud's curated station shelves from `/mixed-selections`.
+/// Native Stations view showing the user's saved/liked stations from `/me/library/all`.
 struct StationsView: View {
     @Bindable var app: AppController
 
-    @State private var likedStations: [SCPlaylist] = []
-    @State private var discoverShelves: [SCMixedSelection] = []
+    @State private var stations: [SCPlaylist] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -187,57 +198,31 @@ struct StationsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Stations").font(.system(size: 24, weight: .bold))
-                    Text("Your saved stations and personalized radio")
+                    Text("Your saved stations")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
 
-                if isLoading && likedStations.isEmpty && discoverShelves.isEmpty {
+                if isLoading && stations.isEmpty {
                     TileGridSkeleton()
-                } else if let errorMessage, likedStations.isEmpty && discoverShelves.isEmpty {
+                } else if let errorMessage, stations.isEmpty {
                     VStack(spacing: 10) {
                         Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
                         Button("Retry") { Task { await refresh() } }.buttonStyle(.borderedProminent)
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
-                } else if likedStations.isEmpty && discoverShelves.isEmpty {
-                    Text("No stations available yet.")
+                } else if stations.isEmpty {
+                    Text("No saved stations in your library yet.")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
-                    if !likedStations.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Your Stations")
-                                .font(.system(size: 17, weight: .bold))
-                            LazyVGrid(columns: gridColumns, spacing: 20) {
-                                ForEach(likedStations, id: \.stableID) { station in
-                                    PlaylistCard(playlist: station, app: app)
-                                }
-                            }
-                        }
-                    }
-
-                    ForEach(discoverShelves) { shelf in
-                        VStack(alignment: .leading, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(shelf.title).font(.system(size: 17, weight: .bold))
-                                if let desc = shelf.description, !desc.isEmpty {
-                                    Text(desc).font(.system(size: 12)).foregroundStyle(.secondary)
-                                }
-                            }
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 16) {
-                                    ForEach(shelf.items?.collection ?? [], id: \.stableID) { station in
-                                        PlaylistCard(playlist: station, app: app)
-                                            .frame(width: 174)
-                                    }
-                                }
-                                .padding(.vertical, 2)
-                            }
+                    LazyVGrid(columns: gridColumns, spacing: 20) {
+                        ForEach(stations, id: \.stableID) { station in
+                            PlaylistCard(playlist: station, app: app)
                         }
                     }
                 }
@@ -252,18 +237,13 @@ struct StationsView: View {
         }
     }
 
-    private struct CachedStations: Codable {
-        let liked: [SCPlaylist]
-        let discover: [SCMixedSelection]
-    }
-
-    private var cacheKey: String { "stations:\(app.currentUser?.id ?? 0):v2" }
+    private var cacheKey: String { "stations:\(app.currentUser?.id ?? 0):v3" }
 
     private func loadStaleWhileRevalidate() async {
-        if likedStations.isEmpty && discoverShelves.isEmpty,
-           let cached = await app.cache.load(CachedStations.self, key: cacheKey) {
-            likedStations = cached.liked
-            discoverShelves = cached.discover
+        if stations.isEmpty,
+           let cached = await app.cache.load([SCPlaylist].self, key: cacheKey),
+           !cached.isEmpty {
+            stations = cached
         }
         await refresh()
     }
@@ -273,12 +253,11 @@ struct StationsView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let result = try await app.api.fetchStations()
-            likedStations = result.liked
-            discoverShelves = result.discover
-            await app.cache.save(CachedStations(liked: result.liked, discover: result.discover), key: cacheKey)
+            let fetched = try await app.api.fetchSavedStations()
+            stations = fetched
+            await app.cache.save(fetched, key: cacheKey)
         } catch {
-            if likedStations.isEmpty && discoverShelves.isEmpty {
+            if stations.isEmpty {
                 errorMessage = error.localizedDescription
             }
         }

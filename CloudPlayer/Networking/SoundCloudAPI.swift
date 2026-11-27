@@ -283,23 +283,23 @@ actor SoundCloudAPI {
         )
     }
 
-    /// Fetches liked stations (`system-playlist-like` in `/me/library/all`) plus SoundCloud's
-    /// station/radio shelves from `/mixed-selections`.
-    func fetchStations() async throws -> (liked: [SCPlaylist], discover: [SCMixedSelection]) {
-        async let libraryTask = fetchLibraryCollections(limit: 50)
-        async let mixedTask = fetchMixedSelections(limit: 15)
+    /// Fetches all of the user's saved/liked stations (`system-playlist-like`) by paginating `/me/library/all`.
+    func fetchSavedStations(maxPages: Int = 12) async throws -> [SCPlaylist] {
+        var stations: [SCPlaylist] = []
+        var seen = Set<String>()
+        var nextHref: String? = nil
 
-        let liked = (try? await libraryTask)?.collection
-            .filter { ($0.type ?? "").contains("system-playlist") }
-            .compactMap(\.resolvedPlaylist) ?? []
-
-        let selections = (try? await mixedTask) ?? []
-        let stationShelves = selections.filter { sel in
-            let t = sel.title.lowercased()
-            return (t.contains("station") || t.contains("radio") || t.contains("mixed for"))
-                && (sel.items?.collection.isEmpty == false)
+        for pageIndex in 0..<maxPages {
+            let page = try await fetchLibraryCollections(limit: 50, nextHref: pageIndex == 0 ? nil : nextHref)
+            for item in page.collection where (item.type ?? "").contains("system-playlist") {
+                if let pl = item.resolvedPlaylist, seen.insert(pl.stableID).inserted {
+                    stations.append(pl)
+                }
+            }
+            guard let next = page.nextHref, !next.isEmpty else { break }
+            nextHref = next
         }
-        return (liked, stationShelves)
+        return stations
     }
 
     // MARK: - Core Request Pipeline

@@ -224,18 +224,52 @@ struct LikesView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let page = try await app.api.fetchTrackLikes(userID: uid, limit: 50)
+            let page = try await app.api.fetchTrackLikes(userID: uid, limit: 200)
             let fetched = page.collection.compactMap(\.track)
-            tracks = fetched
+            if tracks.count <= fetched.count {
+                tracks = fetched
+            } else {
+                // Keep any deeper already-cached likes while updating the top slice in place
+                let topIDs = Set(fetched.map(\.id))
+                let remainder = tracks.filter { !topIDs.contains($0.id) }
+                tracks = fetched + remainder
+            }
             nextHref = page.nextHref
             app.library.registerLikedTracks(fetched)
             if let key = cacheKey {
-                await app.cache.save(fetched, key: key)
+                await app.cache.save(tracks, key: key)
+            }
+            // Background-index all remaining pages so local filtering searches 100% of Likes
+            if let next = page.nextHref {
+                await fetchAllRemainingPages(userID: uid, startingAt: next)
             }
         } catch {
             if tracks.isEmpty {
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func fetchAllRemainingPages(userID: Int, startingAt firstNext: String) async {
+        var cursor: String? = firstNext
+        var all = tracks
+        var seen = Set(all.map(\.id))
+        var pagesFetched = 0
+
+        while let next = cursor, !next.isEmpty, pagesFetched < 25, !Task.isCancelled {
+            pagesFetched += 1
+            guard let page = try? await app.api.fetchTrackLikes(userID: userID, nextHref: next) else { break }
+            let batch = page.collection.compactMap(\.track).filter { seen.insert($0.id).inserted }
+            if !batch.isEmpty {
+                all.append(contentsOf: batch)
+                tracks = all
+                app.library.registerLikedTracks(batch)
+            }
+            cursor = page.nextHref
+        }
+        nextHref = cursor
+        if let key = cacheKey {
+            await app.cache.save(all, key: key)
         }
     }
 
