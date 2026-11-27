@@ -171,28 +171,13 @@ struct TrackDetailView: View {
                         .controlSize(.large)
                         .tint(isLiked ? .accentColor : .white)
 
-                        Button {
-                            app.audio.enqueueLater(track)
-                            app.showToast("Added to Up Next", artworkURL: track.resolvedArtworkURL(size: .small))
-                        } label: {
-                            Label("Up Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .tint(.white)
-
                         if let url = track.permalinkURL {
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(url.absoluteString, forType: .string)
-                                app.showToast("Copied link")
-                            } label: {
-                                Image(systemName: "link")
+                            ShareLink(item: url) {
+                                Label("Share", systemImage: "square.and.arrow.up")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.large)
                             .tint(.white)
-                            .help("Copy Link")
                         }
                     }
                     .padding(.top, 4)
