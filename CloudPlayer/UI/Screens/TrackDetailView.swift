@@ -29,6 +29,7 @@ struct TrackDetailView: View {
     @State private var narrowPane: TrackDetailPane = .comments
     @State private var commentSort: CommentSort = .newest
     @State private var descriptionExpanded = false
+    @State private var showScrollCue = true
 
     init(track: SCTrack, app: AppController) {
         self.track = track
@@ -94,6 +95,12 @@ struct TrackDetailView: View {
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: track.id) {
             await loadComments()
+        }
+        .task(id: track.id) {
+            showScrollCue = true
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            showScrollCue = false
         }
     }
 
@@ -247,10 +254,12 @@ struct TrackDetailView: View {
                         Text("Scroll for comments & related tracks")
                             .font(.system(size: 11, weight: .medium))
                     }
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(0.32))
                     Spacer()
                 }
                 .padding(.top, 2)
+                .opacity(showScrollCue ? 1 : 0)
+                .animation(.easeOut(duration: 0.9), value: showScrollCue)
             }
         }
         .padding(.horizontal, isShort ? 18 : 26)
