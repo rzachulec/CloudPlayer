@@ -219,7 +219,7 @@ struct TrackDetailView: View {
 
                 WaveformCommentsStrip(
                     comments: comments,
-                    duration: duration,
+                    duration: track.durationSeconds > 0 ? track.durationSeconds : duration,
                     currentTime: isCurrent ? app.audio.position : nil,
                     isPlaying: isPlayingThis,
                     onSelectTimestamp: { secs in
@@ -535,6 +535,7 @@ private struct WaveformCommentsStrip: View {
                         }
                         .buttonStyle(.plain)
                         .offset(x: pin.fraction * w)
+                        .transaction { $0.animation = nil }
                         .zIndex(isHighlighted ? 5 : 1)
                         .onHover { over in
                             withAnimation(.easeOut(duration: 0.14)) {

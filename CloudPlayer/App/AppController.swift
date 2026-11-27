@@ -137,6 +137,10 @@ final class AppController {
         let comments = (try? await api.fetchTrackComments(trackID: track.id, limit: 80))?.collection ?? []
         trackCommentsCache[track.id] = comments
         pruneTrackCache()
+        let avatarURLs = comments.prefix(34).compactMap { $0.user?.avatarURL(size: .small) }
+        if !avatarURLs.isEmpty {
+            imagePrefetcher.startPrefetching(with: avatarURLs)
+        }
         return comments
     }
 
