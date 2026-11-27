@@ -7,14 +7,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var mainWindow: NSWindow!
     private var miniPanel: NSPanel!
     private var statusItem: NSStatusItem!
+    private var keyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMainMenu()
         buildMainWindow()
         buildMiniPanel()
         buildStatusItem()
+        installSpacebarShortcut()
         app.start()
         showMain()
+    }
+
+    private func installSpacebarShortcut() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.keyCode == 49, // Space
+                  event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                  self.app.sessionStore.state == .signedIn else {
+                return event
+            }
+            if let responder = event.window?.firstResponder, responder is NSTextView || responder is NSTextField {
+                return event
+            }
+            self.app.audio.togglePlayPause()
+            return nil
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

@@ -283,6 +283,66 @@ actor SoundCloudAPI {
         )
     }
 
+    // MARK: - Track Detail & Profile Endpoints
+
+    func fetchTrackComments(trackID: Int, limit: Int = 40, nextHref: String? = nil) async throws -> SCCollectionPage<SCComment> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/tracks/\(trackID)/comments",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "threaded", value: "0"),
+                URLQueryItem(name: "filter_replies", value: "0"),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func fetchUser(id: Int) async throws -> SCUser {
+        try await get(path: "/users/\(id)")
+    }
+
+    func fetchUserTopTracks(userID: Int, limit: Int = 30) async throws -> [SCTrack] {
+        let page: SCCollectionPage<SCTrack> = try await get(
+            path: "/users/\(userID)/toptracks",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+        return page.collection
+    }
+
+    func fetchUserTracks(userID: Int, limit: Int = 40, nextHref: String? = nil) async throws -> SCCollectionPage<SCTrack> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/users/\(userID)/tracks",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func fetchUserAlbums(userID: Int, limit: Int = 40, nextHref: String? = nil) async throws -> SCCollectionPage<SCPlaylist> {
+        if let nextHref, !nextHref.isEmpty { return try await get(path: nextHref) }
+        return try await get(
+            path: "/users/\(userID)/albums",
+            query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ]
+        )
+    }
+
+    func followUser(userID: Int) async throws {
+        _ = try await sendData(path: "/me/followings/\(userID)", method: "PUT")
+    }
+
+    func unfollowUser(userID: Int) async throws {
+        _ = try await sendData(path: "/me/followings/\(userID)", method: "DELETE")
+    }
+
     /// Fetches all of the user's saved/liked stations (`system-playlist-like`) by paginating `/me/library/all`.
     func fetchSavedStations(maxPages: Int = 12) async throws -> [SCPlaylist] {
         var stations: [SCPlaylist] = []

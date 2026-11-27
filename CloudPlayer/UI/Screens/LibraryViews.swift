@@ -349,6 +349,7 @@ struct FollowingView: View {
             let page = try await app.api.fetchUserFollowings(userID: uid, limit: 50)
             users = page.collection
             nextHref = page.nextHref
+            app.library.registerFollowedUsers(page.collection)
             await app.cache.save(page.collection, key: cacheKey)
         } catch {
             if users.isEmpty { errorMessage = error.localizedDescription }

@@ -239,6 +239,14 @@ struct TrackContextMenu: View {
             app.showToast("Added to Up Next", artworkURL: track.resolvedArtworkURL(size: .small))
         }
         Divider()
+        Button("Go to Track", systemImage: "waveform") {
+            app.router.navigate(to: .track(track))
+        }
+        if let user = track.user {
+            Button("Go to Artist", systemImage: "person.crop.circle") {
+                app.router.navigate(to: .user(user))
+            }
+        }
         Button(liked ? "Unlike" : "Like", systemImage: liked ? "heart.slash" : "heart") {
             app.toggleLike(track)
         }

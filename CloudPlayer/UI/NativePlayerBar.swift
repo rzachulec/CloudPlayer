@@ -92,16 +92,37 @@ struct NativePlayerBar: View {
 
     private func nowPlaying(audio: AudioEngine, track: SCTrack?) -> some View {
         HStack(spacing: 9) {
-            CachedArtwork(url: track?.resolvedArtworkURL(size: .small), size: 32, cornerRadius: 4)
+            Button {
+                if let track { app.router.navigate(to: .track(track)) }
+            } label: {
+                CachedArtwork(url: track?.resolvedArtworkURL(size: .small), size: 32, cornerRadius: 4)
+            }
+            .buttonStyle(.plain)
+            .disabled(track == nil)
+            .help("Go to Track")
+
             VStack(alignment: .leading, spacing: 3) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(track?.title ?? "Not Playing")
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                    Text(track?.artistName ?? "")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Button {
+                        if let track { app.router.navigate(to: .track(track)) }
+                    } label: {
+                        Text(track?.title ?? "Not Playing")
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(track == nil)
+
+                    Button {
+                        if let user = track?.user { app.router.navigate(to: .user(user)) }
+                    } label: {
+                        Text(track?.artistName ?? "")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(track?.user == nil)
                 }
                 NativeThinScrubber(audio: audio)
             }

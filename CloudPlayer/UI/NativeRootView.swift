@@ -171,9 +171,9 @@ private struct NativeMainShell: View {
         case .playlist(let playlist):
             CollectionDetailView(playlist: playlist, app: app)
         case .track(let track):
-            MilestonePlaceholderView(title: track.title, symbol: "waveform", milestone: "Milestone 6")
+            TrackDetailView(track: track, app: app)
         case .user(let user):
-            MilestonePlaceholderView(title: user.displayName, symbol: "person.crop.circle", milestone: "Milestone 6")
+            ProfileView(user: user, app: app)
         }
     }
 
@@ -181,27 +181,6 @@ private struct NativeMainShell: View {
         withAnimation {
             columns = columns == .detailOnly ? .all : .detailOnly
         }
-    }
-}
-
-private struct MilestonePlaceholderView: View {
-    let title: String
-    let symbol: String
-    let milestone: String
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 32))
-                .foregroundStyle(.tertiary)
-            Text(title)
-                .font(.system(size: 18, weight: .semibold))
-            Text("Scheduled for \(milestone)")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
     }
 }
 
