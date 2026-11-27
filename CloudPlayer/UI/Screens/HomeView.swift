@@ -242,20 +242,20 @@ struct PlaylistCard: View {
                 Button(action: playNow) {
                     Group {
                         if isStartingPlayback {
-                            ProgressView().controlSize(.small)
+                            ProgressView().controlSize(.regular)
                         } else {
                             Image(systemName: "play.fill")
-                                .font(.system(size: 20, weight: .semibold))
+                                .font(.system(size: 26, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .offset(x: 1.5)
+                                .offset(x: 2)
                         }
                     }
-                    .frame(width: 48, height: 48)
+                    .frame(width: 62, height: 62)
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .modifier(CardPlayGlass())
-                .scaleEffect(isHovered ? 1.04 : 0.96)
+                .scaleEffect(isHovered ? 1.06 : 0.96)
                 .transition(.scale(scale: 0.85).combined(with: .opacity))
             }
         }

@@ -183,15 +183,15 @@ struct NativeMediaTile: View {
                     if isHovered || isCurrent {
                         Button(action: onPlay) {
                             Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
-                                .font(.system(size: 20, weight: .semibold))
+                                .font(.system(size: 26, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .offset(x: isPlayingThis ? 0 : 1.5)
-                                .frame(width: 48, height: 48)
+                                .offset(x: isPlayingThis ? 0 : 2)
+                                .frame(width: 62, height: 62)
                                 .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
                         .modifier(TilePlayGlass())
-                        .scaleEffect(isHovered ? 1.04 : 0.96)
+                        .scaleEffect(isHovered ? 1.06 : 0.96)
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
                     }
                 }
@@ -215,7 +215,9 @@ struct NativeMediaTile: View {
                 isHovered = hovering
             }
         }
-        .onTapGesture(perform: onPlay)
+        .onTapGesture {
+            app.router.navigate(to: .track(track))
+        }
         .contextMenu {
             TrackContextMenu(track: track, app: app, onPlay: onPlay)
         }
