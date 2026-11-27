@@ -22,11 +22,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func installSpacebarShortcut() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self,
-                  event.keyCode == 49, // Space
                   event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
                   self.app.sessionStore.state == .signedIn else {
                 return event
             }
+            if event.keyCode == 53, self.app.isFocusMode { // Escape exits Focus Mode
+                self.app.exitFocusMode()
+                return nil
+            }
+            guard event.keyCode == 49 else { return event } // Space
             if let responder = event.window?.firstResponder, responder is NSTextView || responder is NSTextField {
                 return event
             }

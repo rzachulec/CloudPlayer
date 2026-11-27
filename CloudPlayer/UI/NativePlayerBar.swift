@@ -155,12 +155,10 @@ struct NativePlayerBar: View {
                 active: app.isFocusMode,
                 help: "Focus Mode"
             ) {
-                withAnimation(.easeInOut(duration: 0.24)) {
-                    if app.isFocusMode {
-                        app.exitFocusMode()
-                    } else {
-                        app.enterFocusMode()
-                    }
+                if app.isFocusMode {
+                    app.exitFocusMode()
+                } else {
+                    app.enterFocusMode()
                 }
             }
             .disabled(!audio.hasTrack)

@@ -1,3 +1,4 @@
+import AppKit
 import NukeUI
 import SwiftUI
 
@@ -105,30 +106,32 @@ private struct NativeMainShell: View {
             }
             .frame(minWidth: 560, minHeight: 440)
             .toolbar {
-                ToolbarItemGroup(placement: .navigation) {
-                    Button(action: toggleSidebar) {
-                        Label("Toggle Sidebar", systemImage: "sidebar.left")
+                if !app.isFocusMode {
+                    ToolbarItemGroup(placement: .navigation) {
+                        Button(action: toggleSidebar) {
+                            Label("Toggle Sidebar", systemImage: "sidebar.left")
+                        }
+                        .help("Show or Hide Sidebar (⌃⌘S)")
                     }
-                    .help("Show or Hide Sidebar (⌃⌘S)")
-                }
-                ToolbarItemGroup(placement: .navigation) {
-                    Button { app.router.goBack() } label: {
-                        Label("Back", systemImage: "chevron.left")
-                    }
-                    .disabled(!app.router.canGoBack)
-                    .help("Back (⌘[)")
+                    ToolbarItemGroup(placement: .navigation) {
+                        Button { app.router.goBack() } label: {
+                            Label("Back", systemImage: "chevron.left")
+                        }
+                        .disabled(!app.router.canGoBack)
+                        .help("Back (⌘[)")
 
-                    Button { app.router.goForward() } label: {
-                        Label("Forward", systemImage: "chevron.right")
+                        Button { app.router.goForward() } label: {
+                            Label("Forward", systemImage: "chevron.right")
+                        }
+                        .disabled(!app.router.canGoForward)
+                        .help("Forward (⌘])")
                     }
-                    .disabled(!app.router.canGoForward)
-                    .help("Forward (⌘])")
-                }
-                ToolbarItem(placement: .principal) {
-                    ToolbarSearchField(prompt: "Search SoundCloud") { query in
-                        app.router.search(query)
+                    ToolbarItem(placement: .principal) {
+                        ToolbarSearchField(prompt: "Search SoundCloud") { query in
+                            app.router.search(query)
+                        }
+                        .frame(minWidth: 160, idealWidth: 260, maxWidth: 340)
                     }
-                    .frame(minWidth: 160, idealWidth: 260, maxWidth: 340)
                 }
             }
         }
@@ -149,15 +152,21 @@ private struct NativeMainShell: View {
                 app.router.replaceCurrent(with: .track(newTrack))
             }
         }
-        .toolbar(app.isFocusMode ? .hidden : .visible, for: .windowToolbar)
+        .onChange(of: app.isFocusMode) { _, focused in
+            if let window = NSApp.windows.first(where: { $0.frameAutosaveName == "MainWindowNative" }) ?? NSApp.mainWindow {
+                window.toolbar?.isVisible = !focused
+                window.titlebarAppearsTransparent = focused
+                window.titleVisibility = .hidden
+            }
+        }
 
             if app.isFocusMode {
                 FocusModeView(app: app)
-                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    .transition(.opacity)
                     .zIndex(100)
             }
         }
-        .animation(.easeInOut(duration: 0.24), value: app.isFocusMode)
+        .animation(.easeOut(duration: 0.22), value: app.isFocusMode)
     }
 
     @ViewBuilder

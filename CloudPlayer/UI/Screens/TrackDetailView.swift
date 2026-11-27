@@ -107,9 +107,7 @@ struct TrackDetailView: View {
         return VStack(alignment: .leading, spacing: isCompact ? 14 : 18) {
             HStack(alignment: .center, spacing: isCompact ? 16 : 22) {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.24)) {
-                        app.enterFocusMode(track: track)
-                    }
+                    app.enterFocusMode(track: track)
                 } label: {
                     CachedArtwork(
                         url: track.resolvedArtworkURL(size: .large),

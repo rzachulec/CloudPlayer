@@ -7,13 +7,14 @@ struct FocusModeView: View {
 
     @State private var isHovering = false
     @State private var isCoverHovered = false
+    @State private var appeared = false
 
     private var track: SCTrack? { app.focusTrack ?? app.audio.currentTrack }
 
     var body: some View {
         ZStack {
-            // Full-bleed blurred artwork backdrop
-            backdrop
+            // Pre-rasterized blurred artwork backdrop (single Metal texture for 120fps transitions)
+            FocusBackdrop(url: track?.resolvedArtworkURL(size: .small))
 
             if let track {
                 GeometryReader { geo in
@@ -23,14 +24,14 @@ struct FocusModeView: View {
                     ZStack {
                         VStack(spacing: 26) {
                             Button {
-                                exit()
+                                app.exitFocusMode()
                             } label: {
                                 CachedArtwork(
                                     url: track.resolvedArtworkURL(size: .large),
                                     size: artSize,
                                     cornerRadius: max(14, artSize * 0.045)
                                 )
-                                .shadow(color: .black.opacity(0.55), radius: 42, y: 18)
+                                .shadow(color: .black.opacity(0.5), radius: 34, y: 16)
                                 .scaleEffect(isCoverHovered ? 1.012 : 1.0)
                                 .animation(.easeOut(duration: 0.18), value: isCoverHovered)
                             }
@@ -53,6 +54,8 @@ struct FocusModeView: View {
                             .frame(maxWidth: max(artSize * 1.25, 360))
                         }
                         .id(track.id)
+                        .scaleEffect(appeared ? 1.0 : 0.94)
+                        .opacity(appeared ? 1.0 : 0.0)
                         .transition(
                             .asymmetric(
                                 insertion: .move(edge: dir == .next ? .trailing : .leading).combined(with: .opacity),
@@ -61,7 +64,7 @@ struct FocusModeView: View {
                         )
                     }
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .animation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.44), value: track.id)
+                    .animation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.42), value: track.id)
                 }
                 .padding(.horizontal, 40)
                 .padding(.vertical, 36)
@@ -72,7 +75,7 @@ struct FocusModeView: View {
                 HStack {
                     Spacer()
                     Button {
-                        exit()
+                        app.exitFocusMode()
                     } label: {
                         Image(systemName: "arrow.down.right.and.arrow.up.left")
                             .font(.system(size: 13, weight: .semibold))
@@ -93,18 +96,25 @@ struct FocusModeView: View {
         .ignoresSafeArea()
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
-        .focusable()
-        .focusEffectDisabled()
-        .onKeyPress(.escape) {
-            exit()
-            return .handled
+        .onAppear {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                appeared = true
+            }
+        }
+        .onDisappear {
+            appeared = false
         }
     }
+}
 
-    private var backdrop: some View {
+/// Equatable, Metal-rasterized backdrop so GPU blur never recomputes during enter/exit or swipe animations.
+private struct FocusBackdrop: View, Equatable {
+    let url: URL?
+
+    var body: some View {
         ZStack {
             Color.black
-            if let url = track?.resolvedArtworkURL(size: .large) {
+            if let url {
                 LazyImage(url: url) { state in
                     if let image = state.image {
                         image
@@ -113,10 +123,10 @@ struct FocusModeView: View {
                     }
                 }
                 .id(url)
-                .blur(radius: 72)
-                .scaleEffect(1.35)
+                .blur(radius: 44)
+                .scaleEffect(1.3)
                 .transition(.opacity)
-                .animation(.easeInOut(duration: 0.5), value: url)
+                .animation(.easeInOut(duration: 0.45), value: url)
             }
             LinearGradient(
                 colors: [.black.opacity(0.42), .black.opacity(0.68)],
@@ -124,12 +134,7 @@ struct FocusModeView: View {
                 endPoint: .bottom
             )
         }
+        .drawingGroup(opaque: true)
         .ignoresSafeArea()
-    }
-
-    private func exit() {
-        withAnimation(.easeInOut(duration: 0.24)) {
-            app.exitFocusMode()
-        }
     }
 }
