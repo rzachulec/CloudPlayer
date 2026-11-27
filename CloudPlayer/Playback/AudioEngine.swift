@@ -61,7 +61,7 @@ final class AudioEngine {
     }
 
     private func setupObservers() {
-        let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
+        let interval = CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
                 guard let self, !self.isScrubbing else { return }

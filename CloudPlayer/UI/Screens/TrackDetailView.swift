@@ -439,6 +439,7 @@ private struct WaveformCommentsStrip: View {
     var onSelectUser: (SCUser) -> Void
 
     @State private var hoveredCommentID: Int?
+    @State private var pillWidth: CGFloat = 220
 
     private struct PinnedComment: Identifiable {
         let comment: SCComment
@@ -524,39 +525,57 @@ private struct WaveformCommentsStrip: View {
             .frame(height: 24)
             .padding(.top, 5)
 
-            // Live comment bubble (fixed height so hero layout never jumps)
-            ZStack(alignment: .leading) {
-                if let active = activeComment {
-                    HStack(spacing: 8) {
-                        Button {
-                            if let u = active.comment.user { onSelectUser(u) }
-                        } label: {
-                            Text(active.comment.user?.displayName ?? "Listener")
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .foregroundStyle(.white)
-                        }
-                        .buttonStyle(.plain)
+            // Live comment bubble centered under its active avatar pin (clamped to container width)
+            GeometryReader { geo in
+                let totalW = geo.size.width
+                let trackW = max(totalW - 20, 1)
+                ZStack(alignment: .leading) {
+                    if let active = activeComment {
+                        let pinCenterX = active.fraction * trackW + 10
+                        let clampedX = min(max(pinCenterX - pillWidth / 2, 0), max(totalW - pillWidth, 0))
 
-                        Text(active.comment.body)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.white.opacity(0.88))
-                            .lineLimit(1)
+                        HStack(spacing: 8) {
+                            Button {
+                                if let u = active.comment.user { onSelectUser(u) }
+                            } label: {
+                                Text(active.comment.user?.displayName ?? "Listener")
+                                    .font(.system(size: 11.5, weight: .semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .buttonStyle(.plain)
 
-                        if let secs = active.comment.timestampSeconds {
-                            Text(formatTime(secs))
-                                .font(.system(size: 10.5).monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.55))
+                            Text(active.comment.body)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.white.opacity(0.88))
+                                .lineLimit(1)
+
+                            if let secs = active.comment.timestampSeconds {
+                                Text(formatTime(secs))
+                                    .font(.system(size: 10.5).monospacedDigit())
+                                    .foregroundStyle(.white.opacity(0.55))
+                            }
                         }
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
+                        .background(.black.opacity(0.38), in: Capsule())
+                        .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
+                        .frame(maxWidth: min(totalW, 440))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .background(
+                            GeometryReader { pillGeo in
+                                Color.clear
+                                    .onAppear { pillWidth = pillGeo.size.width }
+                                    .onChange(of: pillGeo.size.width) { _, newW in pillWidth = newW }
+                            }
+                        )
+                        .offset(x: clampedX)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(.black.opacity(0.38), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
-                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .leading)))
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .animation(.easeOut(duration: 0.2), value: activeComment?.id)
             }
-            .frame(height: 28, alignment: .leading)
-            .animation(.easeOut(duration: 0.18), value: activeComment?.id)
+            .frame(height: 28)
         }
     }
 }

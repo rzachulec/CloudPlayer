@@ -25,27 +25,38 @@ struct WaveformView: View {
                 let totalBars = bars.count
                 guard totalBars > 0 else { return }
                 let playedColor = Color.accentColor
-                let hoverColor = Color.accentColor.opacity(0.45)
+                let hoverColor = Color.accentColor.opacity(0.42)
                 let unplayedColor = Color.primary.opacity(waveform == nil ? 0.10 : (isActive ? 0.24 : 0.18))
 
+                var allBarsPath = Path()
                 for i in 0..<totalBars {
-                    let frac = Double(i) / Double(max(totalBars - 1, 1))
                     let amp = bars[i]
                     let h = max(3, CGFloat(amp) * size.height)
                     let x = CGFloat(i) * step
                     let y = size.height - h
-                    let rect = CGRect(x: x, y: y, width: barWidth, height: h)
-                    let path = Path(roundedRect: rect, cornerRadius: 1.25)
+                    allBarsPath.addRoundedRect(
+                        in: CGRect(x: x, y: y, width: barWidth, height: h),
+                        cornerSize: CGSize(width: 1.25, height: 1.25)
+                    )
+                }
 
-                    let color: Color
-                    if isActive && frac <= displayProgress {
-                        color = playedColor
-                    } else if let hf = hoverFraction, frac <= hf {
-                        color = hoverColor
-                    } else {
-                        color = unplayedColor
+                // Base unplayed bars
+                ctx.fill(allBarsPath, with: .color(unplayedColor))
+
+                // Hover preview fill (sub-pixel clipped)
+                if let hf = hoverFraction, hf > 0 {
+                    ctx.drawLayer { layer in
+                        layer.clip(to: Path(CGRect(x: 0, y: 0, width: size.width * CGFloat(hf), height: size.height)))
+                        layer.fill(allBarsPath, with: .color(hoverColor))
                     }
-                    ctx.fill(path, with: .color(color))
+                }
+
+                // Active played fill (sub-pixel clipped for silky gradual fill)
+                if isActive, displayProgress > 0 {
+                    ctx.drawLayer { layer in
+                        layer.clip(to: Path(CGRect(x: 0, y: 0, width: size.width * CGFloat(displayProgress), height: size.height)))
+                        layer.fill(allBarsPath, with: .color(playedColor))
+                    }
                 }
             }
             .contentShape(Rectangle())
