@@ -9,11 +9,6 @@ struct NativeToast: Identifiable, Equatable, Sendable {
     let artworkURL: URL?
 }
 
-struct TrackDetailPayload: Sendable {
-    let comments: [SCComment]
-    let related: [SCTrack]
-}
-
 /// Central native application controller. Zero WebKit dependency.
 @MainActor
 @Observable
@@ -30,9 +25,10 @@ final class AppController {
     private(set) var lastError: String?
     var toast: NativeToast?
 
-    /// In-memory pre-fetched comments & related tracks keyed by track ID for zero-latency swipe transitions.
-    private var trackDetailsCache: [Int: TrackDetailPayload] = [:]
-    private var trackDetailsInFlight: Set<Int> = []
+    /// Tight sliding-window cache for timed comments (only keeps [previous, current, next, viewing]).
+    private var trackCommentsCache: [Int: [SCComment]] = [:]
+    private var trackCommentsInFlight: Set<Int> = []
+    private var prefetchedArtURLs: Set<URL> = []
     private let imagePrefetcher = ImagePrefetcher()
 
     private let logger = Logger(subsystem: "local.cloudplayer", category: "AppController")
@@ -130,63 +126,71 @@ final class AppController {
         }
     }
 
-    func cachedTrackDetails(for trackID: Int) -> TrackDetailPayload? {
-        trackDetailsCache[trackID]
+    func cachedComments(for trackID: Int) -> [SCComment]? {
+        trackCommentsCache[trackID]
     }
 
-    func loadTrackDetails(for track: SCTrack) async -> TrackDetailPayload {
-        if let existing = trackDetailsCache[track.id] {
+    func loadComments(for track: SCTrack) async -> [SCComment] {
+        if let existing = trackCommentsCache[track.id] {
             return existing
         }
-        async let relatedTask = api.fetchRelatedTracks(trackID: track.id, limit: 15)
-        async let commentsTask = api.fetchTrackComments(trackID: track.id, limit: 80)
-
-        let related = (try? await relatedTask) ?? []
-        let comments = (try? await commentsTask)?.collection ?? []
-        let payload = TrackDetailPayload(comments: comments, related: related)
-        storeTrackDetails(payload, for: track.id)
-        return payload
+        let comments = (try? await api.fetchTrackComments(trackID: track.id, limit: 80))?.collection ?? []
+        trackCommentsCache[track.id] = comments
+        pruneTrackCache()
+        return comments
     }
 
-    /// Pre-fetches artwork (Nuke), waveform JSON, comments, and related tracks for the next and
-    /// previous tracks in the queue so Now Playing swipe transitions render with zero blank frames.
+    /// Pre-fetches only above-the-fold data (artwork, waveform, timed comments) for [previous, next]
+    /// and flushes any older cached tracks outside the active window to keep memory minimal.
     func prefetchAdjacentTracks() {
-        let candidates = [audio.queue.nextUpPreview, audio.queue.history.last].compactMap { $0 }
-        guard !candidates.isEmpty else { return }
+        let neighbors = [audio.queue.nextUpPreview, audio.queue.history.last].compactMap { $0 }
+        pruneTrackCache()
 
-        let artURLs = candidates.compactMap { $0.resolvedArtworkURL(size: .large) }
-        if !artURLs.isEmpty {
-            imagePrefetcher.startPrefetching(with: artURLs)
+        let nextArtURLs = Set(neighbors.compactMap { $0.resolvedArtworkURL(size: .large) })
+        let staleURLs = Array(prefetchedArtURLs.subtracting(nextArtURLs))
+        if !staleURLs.isEmpty {
+            imagePrefetcher.stopPrefetching(with: staleURLs)
         }
+        let newURLs = Array(nextArtURLs.subtracting(prefetchedArtURLs))
+        if !newURLs.isEmpty {
+            imagePrefetcher.startPrefetching(with: newURLs)
+        }
+        prefetchedArtURLs = nextArtURLs
 
-        for track in candidates {
+        for track in neighbors {
             if let wfURL = track.waveformURL {
                 Task { _ = await WaveformCache.shared.waveform(for: wfURL) }
             }
-            if trackDetailsCache[track.id] == nil && !trackDetailsInFlight.contains(track.id) {
-                trackDetailsInFlight.insert(track.id)
+            if trackCommentsCache[track.id] == nil && !trackCommentsInFlight.contains(track.id) {
+                trackCommentsInFlight.insert(track.id)
                 Task { [weak self] in
                     guard let self else { return }
-                    _ = await self.loadTrackDetails(for: track)
-                    self.trackDetailsInFlight.remove(track.id)
+                    _ = await self.loadComments(for: track)
+                    self.trackCommentsInFlight.remove(track.id)
                 }
             }
         }
     }
 
-    private func storeTrackDetails(_ payload: TrackDetailPayload, for trackID: Int) {
-        if trackDetailsCache.count > 40 {
-            trackDetailsCache.removeAll(keepingCapacity: true)
-        }
-        trackDetailsCache[trackID] = payload
+    private func pruneTrackCache() {
+        var keep = Set<Int>()
+        if let cur = audio.currentTrack?.id { keep.insert(cur) }
+        if let next = audio.queue.nextUpPreview?.id { keep.insert(next) }
+        if let prev = audio.queue.history.last?.id { keep.insert(prev) }
+        if case .track(let viewing) = router.current { keep.insert(viewing.id) }
+        trackCommentsCache = trackCommentsCache.filter { keep.contains($0.key) }
     }
 
     func signOut() {
         audio.shutdown()
         library.reset()
         router.reset(to: .likes)
-        trackDetailsCache.removeAll()
-        trackDetailsInFlight.removeAll()
+        trackCommentsCache.removeAll()
+        trackCommentsInFlight.removeAll()
+        if !prefetchedArtURLs.isEmpty {
+            imagePrefetcher.stopPrefetching(with: Array(prefetchedArtURLs))
+            prefetchedArtURLs.removeAll()
+        }
         currentUser = nil
         lastError = nil
         toast = nil

@@ -22,8 +22,10 @@ struct TrackDetailView: View {
     @Bindable var app: AppController
 
     @State private var comments: [SCComment]
-    @State private var related: [SCTrack]
-    @State private var isLoadingDetails = false
+    @State private var related: [SCTrack] = []
+    @State private var isLoadingComments = false
+    @State private var isLoadingRelated = false
+    @State private var hasLoadedRelated = false
     @State private var narrowPane: TrackDetailPane = .comments
     @State private var commentSort: CommentSort = .newest
     @State private var descriptionExpanded = false
@@ -31,9 +33,7 @@ struct TrackDetailView: View {
     init(track: SCTrack, app: AppController) {
         self.track = track
         self.app = app
-        let cached = app.cachedTrackDetails(for: track.id)
-        self._comments = State(initialValue: cached?.comments ?? [])
-        self._related = State(initialValue: cached?.related ?? [])
+        self._comments = State(initialValue: app.cachedComments(for: track.id) ?? [])
     }
 
     private var isCurrent: Bool { app.audio.currentTrack?.id == track.id }
@@ -55,7 +55,7 @@ struct TrackDetailView: View {
             let heroHeight = max(geo.size.height - 86, 340)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
+                LazyVStack(alignment: .leading, spacing: 26) {
                     heroCard(containerSize: geo.size, minHeight: heroHeight)
 
                     if isWide {
@@ -93,7 +93,7 @@ struct TrackDetailView: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: track.id) {
-            await loadDetails()
+            await loadComments()
         }
     }
 
@@ -325,7 +325,7 @@ struct TrackDetailView: View {
                 }
             }
 
-            if isLoadingDetails && comments.isEmpty {
+            if isLoadingComments && comments.isEmpty {
                 LazyVStack(spacing: 8) {
                     ForEach(0..<5, id: \.self) { _ in TrackRowSkeleton() }
                 }
@@ -348,7 +348,7 @@ struct TrackDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Related Tracks")
                 .font(.system(size: 16, weight: .bold))
-            if isLoadingDetails && related.isEmpty {
+            if (isLoadingRelated || !hasLoadedRelated) && related.isEmpty {
                 LazyVStack(spacing: 4) {
                     ForEach(0..<6, id: \.self) { _ in TrackRowSkeleton() }
                 }
@@ -374,6 +374,10 @@ struct TrackDetailView: View {
                     }
                 }
             }
+        }
+        .onAppear {
+            guard !hasLoadedRelated && !isLoadingRelated else { return }
+            Task { await loadRelatedTracks() }
         }
     }
 
@@ -425,19 +429,27 @@ struct TrackDetailView: View {
         .padding(.vertical, 3)
     }
 
-    private func loadDetails() async {
-        if let cached = app.cachedTrackDetails(for: track.id) {
-            comments = cached.comments
-            related = cached.related
+    private func loadComments() async {
+        if let cached = app.cachedComments(for: track.id) {
+            comments = cached
             app.prefetchAdjacentTracks()
             return
         }
-        isLoadingDetails = true
-        defer { isLoadingDetails = false }
-        let payload = await app.loadTrackDetails(for: track)
-        comments = payload.comments
-        related = payload.related
+        isLoadingComments = true
+        defer { isLoadingComments = false }
+        comments = await app.loadComments(for: track)
         app.prefetchAdjacentTracks()
+    }
+
+    private func loadRelatedTracks() async {
+        isLoadingRelated = true
+        defer {
+            isLoadingRelated = false
+            hasLoadedRelated = true
+        }
+        if let fetched = try? await app.api.fetchRelatedTracks(trackID: track.id, limit: 15) {
+            related = fetched
+        }
     }
 }
 
