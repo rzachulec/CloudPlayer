@@ -149,6 +149,22 @@ struct NativePlayerBar: View {
             ) { audio.queueVisible.toggle() }
                 .disabled(!audio.hasTrack)
 
+            IconButton(
+                symbol: "arrow.up.left.and.arrow.down.right",
+                size: 13,
+                active: app.isFocusMode,
+                help: "Focus Mode"
+            ) {
+                withAnimation(.easeInOut(duration: 0.24)) {
+                    if app.isFocusMode {
+                        app.exitFocusMode()
+                    } else {
+                        app.enterFocusMode()
+                    }
+                }
+            }
+            .disabled(!audio.hasTrack)
+
             IconButton(symbol: "pip.enter", size: 13, help: "Mini Player (⇧⌘M)", action: onMini)
 
             NativeVolumeButton(audio: audio)

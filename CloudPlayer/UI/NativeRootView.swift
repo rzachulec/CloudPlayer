@@ -41,7 +41,8 @@ private struct NativeMainShell: View {
             }
         )
 
-        NavigationSplitView(columnVisibility: $columns) {
+        ZStack {
+            NavigationSplitView(columnVisibility: $columns) {
             VStack(spacing: 0) {
                 ZStack(alignment: .bottom) {
                     List(selection: sidebarBinding) {
@@ -136,6 +137,9 @@ private struct NativeMainShell: View {
         }
         .onChange(of: app.audio.currentTrack) { oldTrack, newTrack in
             app.prefetchAdjacentTracks()
+            if app.isFocusMode, let newTrack {
+                app.focusTrack = newTrack
+            }
             guard followNowPlaying,
                   let newTrack,
                   case .track(let viewingTrack) = app.router.current,
@@ -145,6 +149,15 @@ private struct NativeMainShell: View {
                 app.router.replaceCurrent(with: .track(newTrack))
             }
         }
+        .toolbar(app.isFocusMode ? .hidden : .visible, for: .windowToolbar)
+
+            if app.isFocusMode {
+                FocusModeView(app: app)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                    .zIndex(100)
+            }
+        }
+        .animation(.easeInOut(duration: 0.24), value: app.isFocusMode)
     }
 
     @ViewBuilder

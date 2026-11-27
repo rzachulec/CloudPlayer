@@ -106,12 +106,20 @@ struct TrackDetailView: View {
 
         return VStack(alignment: .leading, spacing: isCompact ? 14 : 18) {
             HStack(alignment: .center, spacing: isCompact ? 16 : 22) {
-                CachedArtwork(
-                    url: track.resolvedArtworkURL(size: .large),
-                    size: artSize,
-                    cornerRadius: isCompact ? 12 : 14
-                )
-                .shadow(color: .black.opacity(0.42), radius: 18, y: 8)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.24)) {
+                        app.enterFocusMode(track: track)
+                    }
+                } label: {
+                    CachedArtwork(
+                        url: track.resolvedArtworkURL(size: .large),
+                        size: artSize,
+                        cornerRadius: isCompact ? 12 : 14
+                    )
+                    .shadow(color: .black.opacity(0.42), radius: 18, y: 8)
+                }
+                .buttonStyle(.plain)
+                .help("Enter Focus Mode")
 
                 VStack(alignment: .leading, spacing: isCompact ? 6 : 8) {
                     HStack(spacing: 6) {

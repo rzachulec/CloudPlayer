@@ -24,6 +24,18 @@ final class AppController {
     private(set) var isValidatingSession = false
     private(set) var lastError: String?
     var toast: NativeToast?
+    var focusTrack: SCTrack?
+
+    var isFocusMode: Bool { focusTrack != nil }
+
+    func enterFocusMode(track: SCTrack? = nil) {
+        guard let target = track ?? audio.currentTrack else { return }
+        focusTrack = target
+    }
+
+    func exitFocusMode() {
+        focusTrack = nil
+    }
 
     /// Tight sliding-window cache for timed comments (only keeps [previous, current, next, viewing]).
     private var trackCommentsCache: [Int: [SCComment]] = [:]
