@@ -44,7 +44,7 @@ struct TrackDetailView: View {
     var body: some View {
         GeometryReader { geo in
             let isWide = geo.size.width >= 780
-            let heroHeight = max(geo.size.height - 86, 440)
+            let heroHeight = max(geo.size.height - 86, 340)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
