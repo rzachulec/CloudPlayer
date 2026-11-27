@@ -33,6 +33,7 @@ private struct NativeMainShell: View {
 
     @AppStorage("cp.followNowPlaying") private var followNowPlaying = true
     @State private var columns: NavigationSplitViewVisibility = .all
+    @State private var preQueueWindowWidth: (original: CGFloat, expanded: CGFloat)?
 
     var body: some View {
         let sidebarBinding = Binding<NativeSidebarItem?>(
@@ -104,7 +105,7 @@ private struct NativeMainShell: View {
                 .padding(.trailing, app.audio.queueVisible ? 320 : 0)
                 .animation(.easeOut(duration: 0.22), value: app.audio.queueVisible)
             }
-            .frame(minWidth: 560, minHeight: 440)
+            .frame(minWidth: app.audio.queueVisible ? 880 : 560, minHeight: 440)
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button(action: toggleSidebar) {
@@ -149,6 +150,9 @@ private struct NativeMainShell: View {
             withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.44)) {
                 app.router.replaceCurrent(with: .track(newTrack))
             }
+        }
+        .onChange(of: app.audio.queueVisible) { _, visible in
+            adjustWindowForQueue(visible: visible)
         }
         }
         .coordinateSpace(name: "cpRootWindow")
@@ -198,6 +202,43 @@ private struct NativeMainShell: View {
     private func toggleSidebar() {
         withAnimation {
             columns = columns == .detailOnly ? .all : .detailOnly
+        }
+    }
+
+    /// Expands the main window when opening Up Next at narrow widths so the detail view and
+    /// player bar stay uncluttered, and restores the prior width on close if not manually resized.
+    private func adjustWindowForQueue(visible: Bool) {
+        guard let window = NSApp.windows.first(where: { $0.frameAutosaveName == "MainWindowNative" }) ?? NSApp.mainWindow,
+              !window.styleMask.contains(.fullScreen) else {
+            return
+        }
+
+        if visible {
+            let sidebarAllowance: CGFloat = columns == .detailOnly ? 0 : 165
+            let desiredMinWidth = sidebarAllowance + 560 + 320
+            let screenVisible = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+            let targetWidth = min(desiredMinWidth, screenVisible?.width ?? desiredMinWidth)
+
+            guard window.frame.width < targetWidth else {
+                preQueueWindowWidth = nil
+                return
+            }
+
+            var frame = window.frame
+            let originalWidth = frame.width
+            frame.size.width = targetWidth
+            if let screenVisible, frame.maxX > screenVisible.maxX {
+                frame.origin.x = max(screenVisible.minX, screenVisible.maxX - frame.size.width)
+            }
+            preQueueWindowWidth = (original: originalWidth, expanded: frame.size.width)
+            window.setFrame(frame, display: true, animate: true)
+        } else if let saved = preQueueWindowWidth {
+            preQueueWindowWidth = nil
+            if abs(window.frame.width - saved.expanded) < 6 {
+                var frame = window.frame
+                frame.size.width = saved.original
+                window.setFrame(frame, display: true, animate: true)
+            }
         }
     }
 }
