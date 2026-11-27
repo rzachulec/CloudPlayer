@@ -105,35 +105,31 @@ private struct NativeMainShell: View {
                 .animation(.easeOut(duration: 0.22), value: app.audio.queueVisible)
             }
             .frame(minWidth: 560, minHeight: 440)
-            .navigationTitle(app.isFocusMode ? "" : "CloudPlayer")
-            .toolbarBackground(app.isFocusMode ? .hidden : .automatic, for: .windowToolbar)
             .toolbar {
-                if !app.isFocusMode {
-                    ToolbarItemGroup(placement: .navigation) {
-                        Button(action: toggleSidebar) {
-                            Label("Toggle Sidebar", systemImage: "sidebar.left")
-                        }
-                        .help("Show or Hide Sidebar (⌃⌘S)")
+                ToolbarItemGroup(placement: .navigation) {
+                    Button(action: toggleSidebar) {
+                        Label("Toggle Sidebar", systemImage: "sidebar.left")
                     }
-                    ToolbarItemGroup(placement: .navigation) {
-                        Button { app.router.goBack() } label: {
-                            Label("Back", systemImage: "chevron.left")
-                        }
-                        .disabled(!app.router.canGoBack)
-                        .help("Back (⌘[)")
+                    .help("Show or Hide Sidebar (⌃⌘S)")
+                }
+                ToolbarItemGroup(placement: .navigation) {
+                    Button { app.router.goBack() } label: {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                    .disabled(!app.router.canGoBack)
+                    .help("Back (⌘[)")
 
-                        Button { app.router.goForward() } label: {
-                            Label("Forward", systemImage: "chevron.right")
-                        }
-                        .disabled(!app.router.canGoForward)
-                        .help("Forward (⌘])")
+                    Button { app.router.goForward() } label: {
+                        Label("Forward", systemImage: "chevron.right")
                     }
-                    ToolbarItem(placement: .principal) {
-                        ToolbarSearchField(prompt: "Search SoundCloud") { query in
-                            app.router.search(query)
-                        }
-                        .frame(minWidth: 160, idealWidth: 260, maxWidth: 340)
+                    .disabled(!app.router.canGoForward)
+                    .help("Forward (⌘])")
+                }
+                ToolbarItem(placement: .principal) {
+                    ToolbarSearchField(prompt: "Search SoundCloud") { query in
+                        app.router.search(query)
                     }
+                    .frame(minWidth: 160, idealWidth: 260, maxWidth: 340)
                 }
             }
         }
@@ -155,12 +151,7 @@ private struct NativeMainShell: View {
             }
         }
         .onChange(of: app.isFocusMode) { _, focused in
-            if let window = NSApp.windows.first(where: { $0.frameAutosaveName == "MainWindowNative" }) ?? NSApp.mainWindow {
-                // Keep toolbar.isVisible = true so the underlying ScrollView safe-area inset never shifts/jumps.
-                window.titlebarAppearsTransparent = focused
-                window.titleVisibility = .hidden
-                window.toolbar?.showsBaselineSeparator = !focused
-            }
+            setTitlebarHidden(focused)
         }
 
             if app.focusTrack != nil {
@@ -215,6 +206,28 @@ private struct NativeMainShell: View {
     private func toggleSidebar() {
         withAnimation {
             columns = columns == .detailOnly ? .all : .detailOnly
+        }
+    }
+
+    /// Fades and hides the AppKit titlebar container without altering `toolbar.isVisible` or SwiftUI
+    /// toolbar items, so the underlying detail ScrollView's safe-area inset never changes or jumps.
+    private func setTitlebarHidden(_ hidden: Bool) {
+        guard let window = NSApp.windows.first(where: { $0.frameAutosaveName == "MainWindowNative" }) ?? NSApp.mainWindow,
+              let titlebarContainer = window.standardWindowButton(.closeButton)?.superview?.superview else {
+            return
+        }
+        if !hidden {
+            titlebarContainer.isHidden = false
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            titlebarContainer.animator().alphaValue = hidden ? 0 : 1
+        } completionHandler: {
+            Task { @MainActor in
+                if app.isFocusMode == hidden {
+                    titlebarContainer.isHidden = hidden
+                }
+            }
         }
     }
 }
