@@ -1,48 +1,50 @@
 import AppKit
-import Combine
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, NSMenuItemValidation {
-    let player = WebPlayer()
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
+    let app = AppController()
     private var mainWindow: NSWindow!
+    private var focusWindow: FocusOverlayWindow?
     private var miniPanel: NSPanel!
     private var statusItem: NSStatusItem!
-    private var authSub: AnyCancellable?
+    private var keyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMainMenu()
         buildMainWindow()
         buildMiniPanel()
         buildStatusItem()
-        authSub = player.$auth.removeDuplicates().sink { [weak self] in self?.authChanged($0) }
-        player.load()
+        installSpacebarShortcut()
+        app.onFocusOverlayChanged = { [weak self] visible in
+            if visible {
+                self?.showFocusOverlay()
+            } else {
+                self?.hideFocusOverlay()
+            }
+        }
+        app.start()
         showMain()
     }
 
-    /// Signed out, the window is just the sign-in form (SignInView); signed in, the library.
-    private func authChanged(_ auth: AuthState) {
-        mainWindow.titlebarSeparatorStyle = auth == .signedIn ? .automatic : .none
-        if auth == .signedOut && miniPanel.isVisible { exitMini() }
-        guard auth == .signedIn else { return }
-        // The sign-in screen allows a smaller window than the library: grow it back once
-        // SwiftUI has applied the library's minimum size.
-        DispatchQueue.main.async { [weak self] in
-            guard let w = self?.mainWindow else { return }
-            let content = w.contentRect(forFrameRect: w.frame).size
-            let minimum = w.contentMinSize
-            if content.width < minimum.width || content.height < minimum.height {
-                w.setContentSize(NSSize(width: max(content.width, minimum.width), height: max(content.height, minimum.height)))
+    private func installSpacebarShortcut() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                  self.app.sessionStore.state == .signedIn else {
+                return event
             }
+            if event.keyCode == 53, self.app.isFocusMode { // Escape exits Focus Mode
+                self.app.exitFocusMode()
+                return nil
+            }
+            guard event.keyCode == 49 else { return event } // Space
+            if let responder = event.window?.firstResponder, responder is NSTextView || responder is NSTextField {
+                return event
+            }
+            self.app.audio.togglePlayPause()
+            return nil
         }
-    }
-
-    /// Until there is a session, only app-level commands make sense.
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        guard player.auth != .signedIn, menuItem.target === self else { return true }
-        let allowed: Set<Selector> = [#selector(showMain(_:)), #selector(reloadPage(_:)),
-                                      #selector(editCustomCSS(_:)), #selector(reloadCustomCSS(_:))]
-        return menuItem.action.map(allowed.contains) ?? true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -52,8 +54,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         return true
     }
 
-    /// Closing the main window quits the app (which stops playback, see applicationShouldTerminate).
-    /// Other windows (the mini player) just hide.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender === mainWindow {
             NSApp.terminate(nil)
@@ -63,34 +63,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         return false
     }
 
-    private var isTerminating = false
+    func windowDidResize(_ notification: Notification) {
+        guard notification.object as? NSWindow === mainWindow,
+              let fw = focusWindow, fw.isVisible else { return }
+        fw.setFrame(mainWindow.frame, display: true)
+    }
 
-    /// Quit cleanly: stop and release the audio stream (which also ends WebKit's Now Playing
-    /// entry), unload the page so WebKit flushes storage, then exit. Capped at 2 s so quitting can never hang.
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if isTerminating { return .terminateNow }
-        isTerminating = true
-
-        var replied = false
-        let finish: @MainActor () -> Void = {
-            guard !replied else { return }
-            replied = true
-            NSApp.reply(toApplicationShouldTerminate: true)
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        if let fw = focusWindow, fw.isVisible {
+            fw.setFrame(mainWindow.frame, display: true)
         }
-        player.shutdown(completion: finish)
-        runOnMainRunLoop(after: 2) { finish() }
-        return .terminateLater
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        if let fw = focusWindow, fw.isVisible {
+            fw.setFrame(mainWindow.frame, display: true)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        app.shutdown()
     }
 
     // MARK: Windows
 
     private func buildMainWindow() {
-        let root = MainView(player: player,
-                            onMini: { [weak self] in self?.enterMini() },
-                            onSignOut: { [weak self] in self?.signOut(nil) })
+        let root = NativeRootView(
+            app: app,
+            onMini: { [weak self] in self?.enterMini() },
+            onSignOut: { [weak self] in self?.signOut(nil) }
+        )
         let host = NSHostingController(rootView: root)
-        host.sceneBridgingOptions = [.toolbars]   // SwiftUI .toolbar/.searchable → the window's toolbar
-        host.sizingOptions = [.minSize]           // SwiftUI's layout minimums limit the window
+        host.sceneBridgingOptions = [.toolbars]
+        host.sizingOptions = [.minSize]
 
         let w = NSWindow(contentViewController: host)
         w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
@@ -101,48 +106,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.center()
-        var autosave = true
-        #if DEBUG
-        // -cpWindowSize 700x500: open at this content size (tests the minimum); no autosave.
-        if let spec = UserDefaults.standard.string(forKey: "cpWindowSize") {
-            let parts = spec.split(separator: "x").compactMap { Double($0) }
-            if parts.count == 2 { w.setContentSize(NSSize(width: parts[0], height: parts[1])); autosave = false }
-        }
-        #endif
-        if autosave { w.setFrameAutosaveName("MainWindow") }   // restores the saved frame…
+        w.setFrameAutosaveName("MainWindowNative")
         mainWindow = w
-        DispatchQueue.main.async { [weak w] in    // …which may predate the minimum: grow it back
-            guard let w else { return }
-            let content = w.contentRect(forFrameRect: w.frame).size
-            let minimum = w.contentMinSize
-            if content.width < minimum.width || content.height < minimum.height {
-                w.setContentSize(NSSize(width: max(content.width, minimum.width), height: max(content.height, minimum.height)))
-            }
-        }
     }
 
-    static let standardContentSize = NSSize(width: 1320, height: 880)
-
-    /// Title-bar double-click / Zoom: toggle to a comfortable standard size (fits the screen),
-    /// keeping the window's top-left where it is.
-    func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame newFrame: NSRect) -> NSRect {
-        guard window === mainWindow else { return newFrame }
-        let visible = window.screen?.visibleFrame ?? newFrame
-        let content = NSSize(width: min(Self.standardContentSize.width, visible.width),
-                             height: min(Self.standardContentSize.height, visible.height))
-        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: content))
-        frame.size.width = min(frame.width, visible.width)
-        frame.size.height = min(frame.height, visible.height)
-        frame.origin.x = min(max(window.frame.minX, visible.minX), visible.maxX - frame.width)
-        frame.origin.y = min(max(window.frame.maxY - frame.height, visible.minY), visible.maxY - frame.height)
-        return frame
-    }
+    static let standardContentSize = NSSize(width: 1120, height: 760)
 
     private func buildMiniPanel() {
-        // Borderless, so the SwiftUI view owns the whole shape (all four corners rounded alike).
-        let p = MiniPanel(contentRect: NSRect(x: 0, y: 0, width: MiniPlayerView.width, height: 150),
-                          styleMask: [.borderless, .nonactivatingPanel],
-                          backing: .buffered, defer: false)
+        let p = NativeMiniPanel(
+            contentRect: NSRect(x: 0, y: 0, width: NativeMiniPlayerView.width, height: 150),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
         p.isMovableByWindowBackground = true
         p.isOpaque = false
         p.backgroundColor = .clear
@@ -152,10 +128,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         p.hidesOnDeactivate = false
         p.isReleasedWhenClosed = false
         p.delegate = self
-        let host = NSHostingView(rootView: MiniPlayerView(player: player) { [weak self] in self?.exitMini() })
+
+        let host = NSHostingView(rootView: NativeMiniPlayerView(app: app) { [weak self] in
+            self?.exitMini()
+        })
         p.contentView = host
-        p.setContentSize(host.fittingSize)   // size to the SwiftUI layout
-        p.invalidateShadow()                  // shadow follows the rounded shape
+        p.setContentSize(host.fittingSize)
+        p.invalidateShadow()
 
         if !p.setFrameUsingName("MiniPlayerV2"), let screen = NSScreen.main?.visibleFrame {
             p.setFrameOrigin(NSPoint(x: screen.maxX - p.frame.width - 16, y: screen.maxY - p.frame.height - 16))
@@ -164,7 +143,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         miniPanel = p
     }
 
+    private func showFocusOverlay() {
+        let isFullScreen = mainWindow.styleMask.contains(.fullScreen)
+        let fw: FocusOverlayWindow
+        if let existing = focusWindow {
+            fw = existing
+        } else {
+            fw = FocusOverlayWindow(
+                contentRect: mainWindow.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            fw.isOpaque = false
+            fw.backgroundColor = .clear
+            fw.hasShadow = false
+            fw.isReleasedWhenClosed = false
+            fw.isMovableByWindowBackground = true
+            fw.collectionBehavior = [.fullScreenAuxiliary]
+            focusWindow = fw
+        }
+        let cornerRadius: CGFloat = isFullScreen ? 0 : 16
+        fw.contentView = NSHostingView(rootView: FocusModeView(app: app, cornerRadius: cornerRadius))
+        fw.setFrame(mainWindow.frame, display: true)
+        if fw.parent !== mainWindow {
+            mainWindow.addChildWindow(fw, ordered: .above)
+        }
+        fw.makeKeyAndOrderFront(nil)
+    }
+
+    private func hideFocusOverlay() {
+        guard let fw = focusWindow else { return }
+        if fw.parent === mainWindow {
+            mainWindow.removeChildWindow(fw)
+        }
+        fw.orderOut(nil)
+        fw.contentView = nil
+        mainWindow.makeKeyAndOrderFront(nil)
+    }
+
     private func enterMini() {
+        hideFocusOverlay()
+        app.exitFocusMode()
         mainWindow.orderOut(nil)
         miniPanel.orderFrontRegardless()
     }
@@ -181,17 +201,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         mainWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
-    @objc func playPause(_ sender: Any?) { player.playPause() }
-    @objc func nextTrack(_ sender: Any?) { player.next() }
-    @objc func previousTrack(_ sender: Any?) { player.previous() }
-    @objc func toggleLike(_ sender: Any?) { player.toggleLike() }
-    @objc func toggleShuffle(_ sender: Any?) { player.toggleShuffle() }
-    @objc func cycleRepeat(_ sender: Any?) { player.cycleRepeat() }
-    @objc func reloadPage(_ sender: Any?) { player.reload() }
-    @objc func back(_ sender: Any?) { player.goBack() }
-    @objc func forward(_ sender: Any?) { player.goForward() }
-    @objc func reloadCustomCSS(_ sender: Any?) { player.reloadCustomCSS() }
-    @objc func openSettings(_ sender: Any?) { showMain(); player.open("/settings") }
+    @objc func playPause(_ sender: Any?) { app.audio.togglePlayPause() }
+    @objc func nextTrack(_ sender: Any?) { app.audio.next() }
+    @objc func previousTrack(_ sender: Any?) { app.audio.previous() }
+    @objc func toggleLike(_ sender: Any?) { app.toggleLikeCurrentTrack() }
+    @objc func toggleShuffle(_ sender: Any?) { app.audio.toggleShuffle() }
+    @objc func cycleRepeat(_ sender: Any?) { app.audio.cycleRepeat() }
+    @objc func back(_ sender: Any?) { app.router.goBack() }
+    @objc func forward(_ sender: Any?) { app.router.goForward() }
+    @objc func openSettings(_ sender: Any?) {
+        showMain()
+        app.router.navigate(to: .settings)
+    }
 
     @objc func toggleSidebarColumn(_ sender: Any?) {
         showMain()
@@ -203,36 +224,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NotificationCenter.default.post(name: .cpFocusSearch, object: nil)
     }
 
-    /// Sidebar destinations; the menu item's tag is the SidebarItem's index.
     @objc func goToSection(_ sender: NSMenuItem) {
         showMain()
-        player.open(SidebarItem.allCases[sender.tag].path)
+        let items = NativeSidebarItem.allCases
+        if items.indices.contains(sender.tag) {
+            app.router.selectSidebar(items[sender.tag])
+        }
     }
 
     @objc func signOut(_ sender: Any?) {
         let alert = NSAlert()
         alert.messageText = "Sign out of SoundCloud?"
-        alert.informativeText = "This clears CloudPlayer's saved login and website data."
+        alert.informativeText = "This clears CloudPlayer's saved SoundCloud session."
         alert.addButton(withTitle: "Sign Out")
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { player.signOut() }
-    }
-
-    @objc func editCustomCSS(_ sender: Any?) {
-        let url = WebPlayer.customCSSURL
-        if !FileManager.default.fileExists(atPath: url.path) {
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? Injected.customCSSTemplate.write(to: url, atomically: true, encoding: .utf8)
-        }
-        if !NSWorkspace.shared.open(url) {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+        if alert.runModal() == .alertFirstButtonReturn {
+            if miniPanel.isVisible { exitMini() }
+            app.signOut()
         }
     }
 
     // MARK: Menus
 
-    private func item(_ title: String, _ action: Selector?, _ key: String = "",
-                      _ mods: NSEvent.ModifierFlags = .command, target: AnyObject? = nil) -> NSMenuItem {
+    private func item(
+        _ title: String,
+        _ action: Selector?,
+        _ key: String = "",
+        _ mods: NSEvent.ModifierFlags = .command,
+        target: AnyObject? = nil
+    ) -> NSMenuItem {
         let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
         i.keyEquivalentModifierMask = mods
         i.target = target
@@ -276,18 +296,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             item("Toggle Sidebar", #selector(toggleSidebarColumn(_:)), "s", [.command, .control], target: self),
             .separator(),
             item("Mini Player", #selector(toggleMini(_:)), "m", [.command, .shift], target: self),
-            .separator(),
-            item("Reload Page", #selector(reloadPage(_:)), "r", target: self),
-            .separator(),
-            item("Edit Custom CSS…", #selector(editCustomCSS(_:)), target: self),
-            item("Reload Custom CSS", #selector(reloadCustomCSS(_:)), "r", [.command, .shift], target: self),
         ]))
         var go: [NSMenuItem] = [
             item("Back", #selector(back(_:)), "[", target: self),
             item("Forward", #selector(forward(_:)), "]", target: self),
             .separator(),
         ]
-        for (i, section) in SidebarItem.allCases.enumerated() {
+        for (i, section) in NativeSidebarItem.allCases.enumerated() {
             let mi = item(section.title, #selector(goToSection(_:)), "\(i + 1)", target: self)
             mi.tag = i
             go.append(mi)
@@ -321,21 +336,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         statusItem.menu = m
     }
 
-    /// Rebuilt each time the menu-bar icon is clicked so it shows the current track.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem.menu else { return }
         menu.removeAllItems()
-        let s = player.state
-        if s.hasTrack {
-            let now = NSMenuItem(title: "\(s.title) — \(s.artist)", action: nil, keyEquivalent: "")
+        let audio = app.audio
+        if let track = audio.currentTrack {
+            let now = NSMenuItem(title: "\(track.title) — \(track.artistName)", action: nil, keyEquivalent: "")
             now.isEnabled = false
             menu.addItem(now)
             menu.addItem(.separator())
         }
-        menu.addItem(item(s.isPlaying ? "Pause" : "Play", #selector(playPause(_:)), target: self))
+        menu.addItem(item(audio.isPlaying ? "Pause" : "Play", #selector(playPause(_:)), target: self))
         menu.addItem(item("Next", #selector(nextTrack(_:)), target: self))
         menu.addItem(item("Previous", #selector(previousTrack(_:)), target: self))
-        menu.addItem(item(s.isLiked ? "Unlike" : "Like", #selector(toggleLike(_:)), target: self))
+        menu.addItem(item(app.isCurrentTrackLiked() ? "Unlike" : "Like", #selector(toggleLike(_:)), target: self))
         menu.addItem(.separator())
         menu.addItem(item(miniPanel.isVisible ? "Hide Mini Player" : "Mini Player", #selector(toggleMini(_:)), target: self))
         menu.addItem(item("Show Main Window", #selector(showMain(_:)), target: self))
@@ -344,7 +358,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 }
 
-/// Borderless panels can't become key by default; the mini player needs to (sliders, buttons).
-final class MiniPanel: NSPanel {
+private final class NativeMiniPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+}
+
+private final class FocusOverlayWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 }

@@ -10,8 +10,51 @@ on:
         default: ""
 
 jobs:
+  test:
+    name: Unit tests & WebKit guard
+    runs-on: macos-26
+    env:
+      APP_NAME: CloudPlayer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Verify WebKit isolation
+        run: |
+          MATCHES=$(grep -rlE '^\s*import\s+WebKit\b' CloudPlayer/ | sort || true)
+          EXPECTED="CloudPlayer/Auth/DisposableLoginSheet.swift"
+          if [ "$MATCHES" != "$EXPECTED" ]; then
+            echo "ERROR: WebKit may only be imported in $EXPECTED"
+            echo "Found:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "WebKit isolation OK ($MATCHES)"
+
+      - name: Cache SwiftPM packages
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('CloudPlayer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'CloudPlayer.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Run unit tests
+        run: |
+          xcodebuild \
+            -project "$APP_NAME.xcodeproj" \
+            -scheme "$APP_NAME" \
+            -configuration Debug \
+            -derivedDataPath build \
+            test
+
   build:
     name: Build (${{ matrix.label }})
+    needs: test
     runs-on: macos-26
     strategy:
       fail-fast: false
@@ -31,6 +74,14 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+
+      - name: Cache SwiftPM packages
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('CloudPlayer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'CloudPlayer.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
 
       - name: Build (${{ matrix.arch }})
         env:

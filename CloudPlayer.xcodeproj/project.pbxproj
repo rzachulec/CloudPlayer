@@ -6,8 +6,24 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C0DE00000000000000000101 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE00000000000000000103 /* Nuke */; };
+		C0DE00000000000000000102 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE00000000000000000104 /* NukeUI */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C0DE00000000000000000201 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0DE00000000000000000009 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C0DE00000000000000000006;
+			remoteInfo = CloudPlayer;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		C0DE00000000000000000001 /* CloudPlayer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudPlayer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0DE00000000000000000202 /* CloudPlayerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CloudPlayerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +32,24 @@
 			path = CloudPlayer;
 			sourceTree = "<group>";
 		};
+		C0DE00000000000000000203 /* CloudPlayerTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CloudPlayerTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		C0DE00000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0DE00000000000000000101 /* Nuke in Frameworks */,
+				C0DE00000000000000000102 /* NukeUI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0DE00000000000000000204 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				C0DE00000000000000000002 /* CloudPlayer */,
+				C0DE00000000000000000203 /* CloudPlayerTests */,
 				C0DE00000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				C0DE00000000000000000001 /* CloudPlayer.app */,
+				C0DE00000000000000000202 /* CloudPlayerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -65,10 +97,35 @@
 			);
 			name = CloudPlayer;
 			packageProductDependencies = (
+				C0DE00000000000000000103 /* Nuke */,
+				C0DE00000000000000000104 /* NukeUI */,
 			);
 			productName = CloudPlayer;
 			productReference = C0DE00000000000000000001 /* CloudPlayer.app */;
 			productType = "com.apple.product-type.application";
+		};
+		C0DE00000000000000000205 /* CloudPlayerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0DE00000000000000000208 /* Build configuration list for PBXNativeTarget "CloudPlayerTests" */;
+			buildPhases = (
+				C0DE00000000000000000206 /* Sources */,
+				C0DE00000000000000000204 /* Frameworks */,
+				C0DE00000000000000000207 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C0DE00000000000000000209 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C0DE00000000000000000203 /* CloudPlayerTests */,
+			);
+			name = CloudPlayerTests;
+			packageProductDependencies = (
+			);
+			productName = CloudPlayerTests;
+			productReference = C0DE00000000000000000202 /* CloudPlayerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -83,6 +140,10 @@
 					C0DE00000000000000000006 = {
 						CreatedOnToolsVersion = 27.0;
 					};
+					C0DE00000000000000000205 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = C0DE00000000000000000006;
+					};
 				};
 			};
 			buildConfigurationList = C0DE0000000000000000000A /* Build configuration list for PBXProject "CloudPlayer" */;
@@ -94,18 +155,29 @@
 			);
 			mainGroup = C0DE00000000000000000004;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C0DE00000000000000000100 /* XCRemoteSwiftPackageReference "Nuke" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C0DE00000000000000000005 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				C0DE00000000000000000006 /* CloudPlayer */,
+				C0DE00000000000000000205 /* CloudPlayerTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		C0DE00000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0DE00000000000000000207 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +194,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0DE00000000000000000206 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C0DE00000000000000000209 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C0DE00000000000000000006 /* CloudPlayer */;
+			targetProxy = C0DE00000000000000000201 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		C0DE0000000000000000000C /* Debug */ = {
@@ -212,6 +299,48 @@
 			};
 			name = Release;
 		};
+		C0DE0000000000000000020A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.cloudplayer.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CloudPlayer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CloudPlayer";
+			};
+			name = Debug;
+		};
+		C0DE0000000000000000020B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.cloudplayer.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CloudPlayer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CloudPlayer";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -233,7 +362,40 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		C0DE00000000000000000208 /* Build configuration list for PBXNativeTarget "CloudPlayerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0DE0000000000000000020A /* Debug */,
+				C0DE0000000000000000020B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C0DE00000000000000000100 /* XCRemoteSwiftPackageReference "Nuke" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kean/Nuke.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.8.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C0DE00000000000000000103 /* Nuke */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0DE00000000000000000100 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = Nuke;
+		};
+		C0DE00000000000000000104 /* NukeUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0DE00000000000000000100 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C0DE00000000000000000009 /* Project object */;
 }
