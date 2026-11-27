@@ -357,6 +357,9 @@ struct TrackDetailView: View {
                             app: app,
                             mode: .compact,
                             onPlay: {
+                                withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.44)) {
+                                    app.router.navigate(to: .track(rel))
+                                }
                                 app.audio.play(track: rel, inContext: related, contextTitle: "Related to \(track.title)")
                             },
                             onArtistTap: { user in

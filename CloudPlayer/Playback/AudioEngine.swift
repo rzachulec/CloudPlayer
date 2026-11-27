@@ -124,6 +124,7 @@ final class AudioEngine {
             return
         }
         queue.play(track: track, inContext: context, contextTitle: contextTitle)
+        lastTransitionDirection = .next
         startTrack(track)
     }
 
@@ -253,6 +254,7 @@ final class AudioEngine {
 
     private func startTrack(_ track: SCTrack) {
         loadTask?.cancel()
+        player.pause()
         errorMessage = nil
         preloadedTrackID = nil
         onTrackStarted?(track)
