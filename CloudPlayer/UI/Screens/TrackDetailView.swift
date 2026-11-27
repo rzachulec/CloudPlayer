@@ -191,12 +191,10 @@ struct TrackDetailView: View {
                         .tint(isLiked ? .accentColor : .white)
 
                         if let url = track.permalinkURL {
-                            ShareLink(item: url) {
-                                Label("Share", systemImage: "square.and.arrow.up")
-                            }
-                            .liquidGlassButton()
-                            .controlSize(isCompact ? .regular : .large)
-                            .tint(.white)
+                            NativeShareButton(url: url)
+                                .liquidGlassButton()
+                                .controlSize(isCompact ? .regular : .large)
+                                .tint(.white)
                         }
                     }
                     .padding(.top, 4)

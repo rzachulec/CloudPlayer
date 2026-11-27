@@ -121,12 +121,10 @@ struct CollectionDetailView: View {
                     .disabled(tracks.isEmpty)
 
                     if let url = playlist.permalinkURL {
-                        ShareLink(item: url) {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
-                        .liquidGlassButton()
-                        .controlSize(.large)
-                        .tint(.white)
+                        NativeShareButton(url: url)
+                            .liquidGlassButton()
+                            .controlSize(.large)
+                            .tint(.white)
                     }
                 }
                 .padding(.top, 4)

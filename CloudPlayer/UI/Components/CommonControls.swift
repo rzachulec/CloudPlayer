@@ -202,6 +202,60 @@ struct LiquidSegmentedPicker<Option: Hashable & Identifiable>: View {
     }
 }
 
+// MARK: - Properly Anchored Native macOS Share Picker
+
+/// Presents `NSSharingServicePicker` anchored at the current mouse cursor in the active window
+/// (fixes SwiftUI `ShareLink` in `.contextMenu` falling back to top-center of the window).
+@MainActor
+func presentSharePickerAtCursor(url: URL) {
+    guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
+          let contentView = window.contentView else { return }
+    let screenPt = NSEvent.mouseLocation
+    let windowPt = window.convertPoint(fromScreen: screenPt)
+    let viewPt = contentView.convert(windowPt, from: nil)
+    let rect = NSRect(x: viewPt.x, y: viewPt.y, width: 1, height: 1)
+    let picker = NSSharingServicePicker(items: [url])
+    picker.show(relativeTo: rect, of: contentView, preferredEdge: .minY)
+}
+
+@MainActor
+private final class ShareAnchorBox {
+    weak var view: NSView?
+}
+
+private struct ShareAnchorView: NSViewRepresentable {
+    let box: ShareAnchorBox
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        box.view = v
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        box.view = nsView
+    }
+}
+
+/// Liquid Glass Share button that anchors `NSSharingServicePicker` directly to the button itself.
+struct NativeShareButton: View {
+    let url: URL
+    var title: String = "Share"
+
+    @State private var anchor = ShareAnchorBox()
+
+    var body: some View {
+        Button {
+            if let view = anchor.view {
+                NSSharingServicePicker(items: [url]).show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+            } else {
+                presentSharePickerAtCursor(url: url)
+            }
+        } label: {
+            Label(title, systemImage: "square.and.arrow.up")
+        }
+        .background(ShareAnchorView(box: anchor))
+    }
+}
+
 func formatTime(_ t: Double) -> String {
     guard t.isFinite, t > 0 else { return "0:00" }
     let total = Int(t.rounded())

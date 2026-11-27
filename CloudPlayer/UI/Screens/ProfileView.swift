@@ -169,11 +169,9 @@ struct ProfileView: View {
                     }
 
                     if let url = user.permalinkURL {
-                        ShareLink(item: url) {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
-                        .liquidGlassButton()
-                        .tint(.white)
+                        NativeShareButton(url: url)
+                            .liquidGlassButton()
+                            .tint(.white)
 
                         Button {
                             NSWorkspace.shared.open(url)

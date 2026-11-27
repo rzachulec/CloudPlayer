@@ -221,8 +221,8 @@ struct PlaylistCard: View {
             }
             if let url = playlist.permalinkURL {
                 Divider()
-                ShareLink(item: url) {
-                    Label("Share", systemImage: "square.and.arrow.up")
+                Button("Share…", systemImage: "square.and.arrow.up") {
+                    presentSharePickerAtCursor(url: url)
                 }
                 Button("Open on SoundCloud", systemImage: "safari") {
                     NSWorkspace.shared.open(url)
