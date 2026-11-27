@@ -114,6 +114,9 @@ final class AppController {
     }
 
     func showToast(_ text: String, artworkURL: URL? = nil, duration: TimeInterval = 3.2) {
+        if UserDefaults.standard.object(forKey: "cp.showToasts") as? Bool == false {
+            return
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let t = NativeToast(text: trimmed, artworkURL: artworkURL)
@@ -124,6 +127,14 @@ final class AppController {
                 self?.toast = nil
             }
         }
+    }
+
+    func clearAllCaches() async {
+        await cache.clearAll()
+        trackCommentsCache.removeAll()
+        ImagePipeline.shared.cache.removeAll()
+        URLCache.shared.removeAllCachedResponses()
+        showToast("Cleared cached data")
     }
 
     func cachedComments(for trackID: Int) -> [SCComment]? {

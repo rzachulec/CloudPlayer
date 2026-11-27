@@ -30,6 +30,7 @@ private struct NativeMainShell: View {
     var onMini: () -> Void
     var onSignOut: () -> Void
 
+    @AppStorage("cp.followNowPlaying") private var followNowPlaying = true
     @State private var columns: NavigationSplitViewVisibility = .all
 
     var body: some View {
@@ -41,28 +42,35 @@ private struct NativeMainShell: View {
         )
 
         NavigationSplitView(columnVisibility: $columns) {
-            ZStack(alignment: .bottom) {
-                List(selection: sidebarBinding) {
-                    Section {
-                        Label(NativeSidebarItem.home.title, systemImage: NativeSidebarItem.home.symbol)
-                            .tag(NativeSidebarItem.home)
-                    }
-                    Section("Library") {
-                        ForEach(NativeSidebarItem.library) { item in
-                            Label(item.title, systemImage: item.symbol).tag(item)
+            VStack(spacing: 0) {
+                ZStack(alignment: .bottom) {
+                    List(selection: sidebarBinding) {
+                        Section {
+                            Label(NativeSidebarItem.home.title, systemImage: NativeSidebarItem.home.symbol)
+                                .tag(NativeSidebarItem.home)
+                        }
+                        Section("Library") {
+                            ForEach(NativeSidebarItem.library) { item in
+                                Label(item.title, systemImage: item.symbol).tag(item)
+                            }
                         }
                     }
-                }
-                .listStyle(.sidebar)
+                    .listStyle(.sidebar)
 
-                if let toast = app.toast {
-                    NativeToastView(toast: toast) { app.toast = nil }
-                        .padding(10)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .zIndex(10)
+                    if let toast = app.toast {
+                        NativeToastView(toast: toast) { app.toast = nil }
+                            .padding(10)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .zIndex(10)
+                    }
                 }
+                .animation(.spring(duration: 0.32), value: app.toast)
+
+                Divider()
+                    .opacity(0.45)
+
+                SidebarProfileFooter(app: app, onSignOut: onSignOut)
             }
-            .animation(.spring(duration: 0.32), value: app.toast)
             .navigationSplitViewColumnWidth(min: 145, ideal: 165, max: 220)
         } detail: {
             ZStack(alignment: .bottom) {
@@ -121,27 +129,6 @@ private struct NativeMainShell: View {
                     }
                     .frame(minWidth: 160, idealWidth: 260, maxWidth: 340)
                 }
-                if #available(macOS 26.0, *) {
-                    ToolbarSpacer(.flexible)
-                }
-                ToolbarItem(placement: .automatic) {
-                    Menu {
-                        if let user = app.currentUser {
-                            Text(user.displayName)
-                            Divider()
-                            Button("Profile") { app.router.navigate(to: .user(user)) }
-                        }
-                        if let url = URL(string: "https://soundcloud.com/settings") {
-                            Button("SoundCloud Settings (Browser)") { NSWorkspace.shared.open(url) }
-                        }
-                        Divider()
-                        Button("Sign Out…", role: .destructive, action: onSignOut)
-                    } label: {
-                        Label("Account", systemImage: "person.crop.circle")
-                    }
-                    .menuIndicator(.hidden)
-                    .help("Account")
-                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .cpToggleSidebar)) { _ in
@@ -149,7 +136,8 @@ private struct NativeMainShell: View {
         }
         .onChange(of: app.audio.currentTrack) { oldTrack, newTrack in
             app.prefetchAdjacentTracks()
-            guard let newTrack,
+            guard followNowPlaying,
+                  let newTrack,
                   case .track(let viewingTrack) = app.router.current,
                   viewingTrack.id != newTrack.id,
                   oldTrack?.id == viewingTrack.id else { return }
@@ -195,6 +183,8 @@ private struct NativeMainShell: View {
             .clipped()
         case .user(let user):
             ProfileView(user: user, app: app)
+        case .settings:
+            SettingsView(app: app, onSignOut: onSignOut)
         }
     }
 
@@ -202,6 +192,79 @@ private struct NativeMainShell: View {
         withAnimation {
             columns = columns == .detailOnly ? .all : .detailOnly
         }
+    }
+}
+
+/// Lower-left sidebar user profile footer: click opens your profile, right-click opens the account menu.
+private struct SidebarProfileFooter: View {
+    @Bindable var app: AppController
+    var onSignOut: () -> Void
+    @State private var isHovered = false
+
+    private var isViewingOwnProfile: Bool {
+        guard let me = app.currentUser, case .user(let u) = app.router.current else { return false }
+        return u.id == me.id
+    }
+
+    var body: some View {
+        Button {
+            if let user = app.currentUser {
+                app.router.navigate(to: .user(user))
+            }
+        } label: {
+            HStack(spacing: 9) {
+                LazyImage(url: app.currentUser?.avatarURL(size: .small)) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Circle().fill(.quaternary)
+                            .overlay(
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            )
+                    }
+                }
+                .frame(width: 26, height: 26)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
+
+                Text(app.currentUser?.displayName ?? app.sessionStore.session?.username ?? "Account")
+                    .font(.system(size: 12.5, weight: isViewingOwnProfile ? .semibold : .medium))
+                    .foregroundStyle(isViewingOwnProfile ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isViewingOwnProfile ? Color.accentColor.opacity(0.14) : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .onHover { isHovered = $0 }
+        .contextMenu {
+            if let user = app.currentUser {
+                Button("Profile", systemImage: "person.crop.circle") {
+                    app.router.navigate(to: .user(user))
+                }
+            }
+            Button("Settings…", systemImage: "gearshape") {
+                app.router.navigate(to: .settings)
+            }
+            if let url = URL(string: "https://soundcloud.com/settings") {
+                Button("SoundCloud Settings (Browser)", systemImage: "safari") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            Divider()
+            Button("Sign Out…", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive, action: onSignOut)
+        }
+        .help("Open Profile (right-click for Settings & Sign Out)")
     }
 }
 

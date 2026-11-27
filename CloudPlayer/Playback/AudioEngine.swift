@@ -52,6 +52,9 @@ final class AudioEngine {
         self.resolver = StreamResolver(api: api)
         let savedVol = UserDefaults.standard.object(forKey: "volume") as? Double ?? 1.0
         self.volume = min(max(savedVol, 0), 1)
+        if let savedAutoplay = UserDefaults.standard.object(forKey: "cp.autoplayEnabled") as? Bool {
+            self.queue.autoplayEnabled = savedAutoplay
+        }
         self.player.volume = Float(self.volume)
         self.player.automaticallyWaitsToMinimizeStalling = true
 

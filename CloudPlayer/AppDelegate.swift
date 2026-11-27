@@ -138,6 +138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc func cycleRepeat(_ sender: Any?) { app.audio.cycleRepeat() }
     @objc func back(_ sender: Any?) { app.router.goBack() }
     @objc func forward(_ sender: Any?) { app.router.goForward() }
+    @objc func openSettings(_ sender: Any?) {
+        showMain()
+        app.router.navigate(to: .settings)
+    }
 
     @objc func toggleSidebarColumn(_ sender: Any?) {
         showMain()
@@ -197,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(submenu("CloudPlayer", [
             item("About CloudPlayer", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
             .separator(),
+            item("Settings…", #selector(openSettings(_:)), ",", target: self),
             item("Sign Out…", #selector(signOut(_:)), target: self),
             .separator(),
             item("Hide CloudPlayer", #selector(NSApplication.hide(_:)), "h"),
