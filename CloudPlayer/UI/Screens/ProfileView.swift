@@ -169,16 +169,11 @@ struct ProfileView: View {
                     }
 
                     if let url = user.permalinkURL {
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(url.absoluteString, forType: .string)
-                            app.showToast("Copied profile link")
-                        } label: {
-                            Image(systemName: "link")
+                        ShareLink(item: url) {
+                            Label("Share", systemImage: "square.and.arrow.up")
                         }
                         .liquidGlassButton()
                         .tint(.white)
-                        .help("Copy Profile Link")
 
                         Button {
                             NSWorkspace.shared.open(url)

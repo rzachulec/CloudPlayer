@@ -254,10 +254,8 @@ struct TrackContextMenu: View {
         }
         if let url = track.permalinkURL {
             Divider()
-            Button("Copy Link", systemImage: "link") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url.absoluteString, forType: .string)
-                app.showToast("Copied link")
+            ShareLink(item: url) {
+                Label("Share", systemImage: "square.and.arrow.up")
             }
             Button("Open on SoundCloud", systemImage: "safari") {
                 NSWorkspace.shared.open(url)
