@@ -169,6 +169,10 @@ struct TrackDetailView: View {
                             Label(formatCompactCount(reposts), systemImage: "arrow.2.squarepath")
                         }
                         Label(formatTime(duration), systemImage: "clock")
+                        if let uploaded = track.relativeUploadDate {
+                            Label(uploaded, systemImage: "calendar")
+                                .help(track.formattedUploadDate.map { "Uploaded \($0)" } ?? "")
+                        }
                     }
                     .font(.system(size: isCompact ? 11 : 12).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.76))

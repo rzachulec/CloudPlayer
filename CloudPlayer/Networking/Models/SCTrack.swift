@@ -102,6 +102,61 @@ struct SCTrack: Codable, Identifiable, Hashable, Sendable {
     func resolvedArtworkURL(size: SCImageSize = .large) -> URL? {
         (artworkURL ?? user?.avatarURL)?.scImageVariant(size)
     }
+
+    var uploadedDate: Date? {
+        guard let createdAt else { return nil }
+        return SCDateParser.parse(createdAt)
+    }
+
+    var relativeUploadDate: String? {
+        guard let date = uploadedDate else { return nil }
+        return SCDateParser.relativeString(for: date)
+    }
+
+    var formattedUploadDate: String? {
+        guard let date = uploadedDate else { return nil }
+        return SCDateParser.fullDateString(for: date)
+    }
+}
+
+/// Shared ISO-8601 parser & date formatters for SoundCloud `created_at` timestamps.
+enum SCDateParser {
+    private static let isoBasic: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
+    }()
+
+    private static let fullDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .long
+        f.timeStyle = .short
+        return f
+    }()
+
+    static func parse(_ string: String) -> Date? {
+        isoBasic.date(from: string) ?? isoFractional.date(from: string)
+    }
+
+    static func relativeString(for date: Date) -> String {
+        relativeFormatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    static func fullDateString(for date: Date) -> String {
+        fullDateFormatter.string(from: date)
+    }
 }
 
 struct SCMedia: Codable, Hashable, Sendable {

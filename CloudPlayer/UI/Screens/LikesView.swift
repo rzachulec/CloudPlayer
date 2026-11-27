@@ -1,11 +1,42 @@
 import SwiftUI
 
+private enum LikesSort: String, CaseIterable, Identifiable {
+    case recentlyLiked = "Recently Liked"
+    case oldestLiked = "Oldest Liked"
+    case uploadNewest = "Upload Date (Newest)"
+    case uploadOldest = "Upload Date (Oldest)"
+    case titleAZ = "Title (A–Z)"
+    case artistAZ = "Artist (A–Z)"
+    case mostPlayed = "Most Played"
+    case mostLiked = "Most Liked"
+    case durationLongest = "Longest"
+    case durationShortest = "Shortest"
+
+    var id: Self { self }
+
+    var shortLabel: String {
+        switch self {
+        case .recentlyLiked: "Sort"
+        case .oldestLiked: "Oldest Liked"
+        case .uploadNewest: "Newest"
+        case .uploadOldest: "Oldest"
+        case .titleAZ: "Title"
+        case .artistAZ: "Artist"
+        case .mostPlayed: "Most Played"
+        case .mostLiked: "Most Liked"
+        case .durationLongest: "Longest"
+        case .durationShortest: "Shortest"
+        }
+    }
+}
+
 /// Native Likes screen with stale-while-revalidate caching, shimmering skeletons,
-/// Tiles / Compact / Waveform view modes, instant local filtering, and infinite scroll.
+/// Tiles / Compact / Waveform view modes, instant local filtering, metadata sorting, and infinite scroll.
 struct LikesView: View {
     @Bindable var app: AppController
 
     @AppStorage("cp.viewMode.likes") private var viewModeRaw: String = TrackListDisplayMode.compact.rawValue
+    @AppStorage("cp.sort.likes") private var sortRaw: String = LikesSort.recentlyLiked.rawValue
     @State private var tracks: [SCTrack] = []
     @State private var nextHref: String?
     @State private var isLoading = false
@@ -17,13 +48,43 @@ struct LikesView: View {
         TrackListDisplayMode(rawValue: viewModeRaw) ?? .compact
     }
 
+    private var sortOrder: LikesSort {
+        LikesSort(rawValue: sortRaw) ?? .recentlyLiked
+    }
+
     private var filteredTracks: [SCTrack] {
         let q = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return tracks }
-        return tracks.filter {
+        let base: [SCTrack] = q.isEmpty ? tracks : tracks.filter {
             $0.title.lowercased().contains(q)
                 || $0.artistName.lowercased().contains(q)
                 || ($0.genre?.lowercased().contains(q) ?? false)
+        }
+        switch sortOrder {
+        case .recentlyLiked:
+            return base
+        case .oldestLiked:
+            return base.reversed()
+        case .uploadNewest:
+            return base.sorted { ($0.uploadedDate ?? .distantPast) > ($1.uploadedDate ?? .distantPast) }
+        case .uploadOldest:
+            return base.sorted { ($0.uploadedDate ?? .distantFuture) < ($1.uploadedDate ?? .distantFuture) }
+        case .titleAZ:
+            return base.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .artistAZ:
+            return base.sorted {
+                let cmp = $0.artistName.localizedCaseInsensitiveCompare($1.artistName)
+                return cmp == .orderedSame
+                    ? $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                    : cmp == .orderedAscending
+            }
+        case .mostPlayed:
+            return base.sorted { ($0.playbackCount ?? -1) > ($1.playbackCount ?? -1) }
+        case .mostLiked:
+            return base.sorted { ($0.likesCount ?? -1) > ($1.likesCount ?? -1) }
+        case .durationLongest:
+            return base.sorted { $0.duration > $1.duration }
+        case .durationShortest:
+            return base.sorted { $0.duration < $1.duration }
         }
     }
 
@@ -60,6 +121,27 @@ struct LikesView: View {
 
             // Instant local filter
             LiquidFilterField(text: $filterText, width: 130)
+
+            // Metadata sort menu
+            Menu {
+                ForEach(LikesSort.allCases) { option in
+                    Button {
+                        sortRaw = option.rawValue
+                    } label: {
+                        if sortOrder == option {
+                            Label(option.rawValue, systemImage: "checkmark")
+                        } else {
+                            Text(option.rawValue)
+                        }
+                    }
+                }
+            } label: {
+                Label(sortOrder.shortLabel, systemImage: "arrow.up.arrow.down")
+            }
+            .menuStyle(.button)
+            .liquidGlassButton(prominent: sortOrder != .recentlyLiked)
+            .fixedSize()
+            .help("Sort Likes: \(sortOrder.rawValue)")
 
             // View mode segmented picker (Tiles / Compact / Waveform)
             LiquidIconPicker(
