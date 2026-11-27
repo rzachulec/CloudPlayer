@@ -91,7 +91,7 @@ struct NativeTrackRow: View {
                         url: track.waveformURL,
                         progress: progress,
                         isActive: isCurrent,
-                        height: 30
+                        height: 32
                     ) { fraction in
                         if isCurrent {
                             app.audio.seek(fraction: fraction)
@@ -122,15 +122,16 @@ struct NativeTrackRow: View {
     }
 
     private var artworkControl: some View {
-        let side: CGFloat = mode == .waveform ? 64 : 44
+        let side: CGFloat = mode == .waveform ? 76 : 44
+        let radius: CGFloat = mode == .waveform ? 8 : 6
         return ZStack {
-            CachedArtwork(url: track.resolvedArtworkURL(size: mode == .waveform ? .medium : .small), size: side, cornerRadius: 6)
+            CachedArtwork(url: track.resolvedArtworkURL(size: mode == .waveform ? .medium : .small), size: side, cornerRadius: radius)
             if isHovered || isCurrent {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(.black.opacity(isHovered ? 0.42 : 0.34))
                     .frame(width: side, height: side)
                 Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
-                    .font(.system(size: mode == .waveform ? 20 : 14, weight: .semibold))
+                    .font(.system(size: mode == .waveform ? 24 : 14, weight: .semibold))
                     .foregroundStyle(.white)
                     .offset(x: isPlayingThis ? 0 : 1)
             }

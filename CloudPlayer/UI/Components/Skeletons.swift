@@ -42,9 +42,9 @@ struct TrackRowSkeleton: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: waveformMode ? 8 : 6, style: .continuous)
                 .fill(.quaternary)
-                .frame(width: waveformMode ? 64 : 44, height: waveformMode ? 64 : 44)
+                .frame(width: waveformMode ? 76 : 44, height: waveformMode ? 76 : 44)
             VStack(alignment: .leading, spacing: 6) {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(.quaternary)
