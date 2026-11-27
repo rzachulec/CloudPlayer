@@ -44,6 +44,35 @@ final class Milestone4ModelTests: XCTestCase {
         XCTAssertEqual(page.collection.count, 1)
         XCTAssertEqual(page.collection[0].title, "More of what you like")
         XCTAssertEqual(page.collection[0].items?.collection.count, 1)
-        XCTAssertEqual(page.collection[0].items?.collection[0].title, "Chill Mix")
+        if case .playlist(let pl)? = page.collection[0].items?.collection.first {
+            XCTAssertEqual(pl.title, "Chill Mix")
+        } else {
+            XCTFail("Expected playlist entry")
+        }
+    }
+
+    func testSystemPlaylistStringIDAndDeduplication() throws {
+        let json = """
+        {
+          "collection": [
+            {
+              "urn": "soundcloud:selections:recent",
+              "title": "Recently Played",
+              "items": {
+                "collection": [
+                  { "kind": "system-playlist", "id": "soundcloud:system-playlists:abc", "title": "Related tracks" },
+                  { "kind": "playlist", "id": 517, "title": "Red Light" },
+                  { "kind": "playlist", "id": 517, "title": "Red Light" },
+                  { "kind": "user", "id": 99, "username": "artist_one" }
+                ]
+              }
+            }
+          ]
+        }
+        """
+        let page = try JSONDecoder().decode(SCCollectionPage<SCMixedSelection>.self, from: Data(json.utf8))
+        let items = page.collection[0].items?.collection ?? []
+        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(items.map(\.id), ["soundcloud:system-playlists:abc", "pl:517", "user:99"])
     }
 }

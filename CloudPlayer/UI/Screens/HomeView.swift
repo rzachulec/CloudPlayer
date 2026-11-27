@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Native Home / Discover screen backed by `/mixed-selections` with stale-while-revalidate caching,
-/// shimmering carousel skeletons, and instant click-to-play playlist cards.
+/// shimmering carousel skeletons, and instant click-to-play playlist/station/user cards.
 struct HomeView: View {
     @Bindable var app: AppController
 
@@ -97,10 +97,17 @@ struct HomeView: View {
                         }
 
                         ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 16) {
-                                ForEach(selection.items?.collection ?? [], id: \.stableID) { playlist in
-                                    PlaylistCard(playlist: playlist, app: app)
-                                        .frame(width: 174)
+                            LazyHStack(alignment: .top, spacing: 16) {
+                                ForEach(selection.items?.collection ?? []) { entry in
+                                    switch entry {
+                                    case .playlist(let playlist):
+                                        PlaylistCard(playlist: playlist, app: app, fixedSize: 174)
+                                    case .user(let user):
+                                        UserCard(user: user) {
+                                            app.router.navigate(to: .user(user))
+                                        }
+                                        .frame(width: 166)
+                                    }
                                 }
                             }
                             .padding(.vertical, 2)
@@ -139,7 +146,7 @@ struct HomeView: View {
     // MARK: - Stale-While-Revalidate
 
     private var cacheKey: String {
-        "home:mixed:\(app.currentUser?.id ?? 0):v1"
+        "home:mixed:\(app.currentUser?.id ?? 0):v2"
     }
 
     private func loadStaleWhileRevalidate() async {
@@ -156,7 +163,7 @@ struct HomeView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let fetched = try await app.api.fetchMixedSelections(limit: 12)
+            let fetched = try await app.api.fetchMixedSelections(limit: 15)
             selections = fetched
             await app.cache.save(fetched, key: cacheKey)
         } catch {
@@ -168,43 +175,25 @@ struct HomeView: View {
 }
 
 /// Reusable square card for Playlists, Albums, and Home Mixes with instant Liquid Glass Play button.
+/// Pass `fixedSize` inside horizontal `LazyHStack` carousels to avoid `GeometryReader` layout thrashing.
 struct PlaylistCard: View {
     let playlist: SCPlaylist
     @Bindable var app: AppController
+    var fixedSize: CGFloat? = nil
 
     @State private var isHovered = false
     @State private var isStartingPlayback = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            GeometryReader { geo in
-                let side = geo.size.width
-                ZStack {
-                    CachedArtwork(url: playlist.resolvedArtworkURL(size: .large), size: side, cornerRadius: 10)
-
-                    if isHovered || isStartingPlayback {
-                        Button(action: playNow) {
-                            Group {
-                                if isStartingPlayback {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Image(systemName: "play.fill")
-                                        .font(.system(size: 20, weight: .semibold))
-                                        .foregroundStyle(.white)
-                                        .offset(x: 1.5)
-                                }
-                            }
-                            .frame(width: 48, height: 48)
-                            .contentShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .modifier(CardPlayGlass())
-                        .scaleEffect(isHovered ? 1.04 : 0.96)
-                        .transition(.scale(scale: 0.85).combined(with: .opacity))
-                    }
+            if let side = fixedSize {
+                artworkBox(side: side)
+            } else {
+                GeometryReader { geo in
+                    artworkBox(side: geo.size.width)
                 }
+                .aspectRatio(1, contentMode: .fit)
             }
-            .aspectRatio(1, contentMode: .fit)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(playlist.title)
@@ -216,6 +205,7 @@ struct PlaylistCard: View {
                     .lineLimit(1)
             }
         }
+        .frame(width: fixedSize)
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.spring(duration: 0.22, bounce: 0.2)) {
@@ -235,12 +225,41 @@ struct PlaylistCard: View {
                 Button("Copy Link", systemImage: "link") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                    app.showToast("Copied link")
                 }
                 Button("Open on SoundCloud", systemImage: "safari") {
                     NSWorkspace.shared.open(url)
                 }
             }
         }
+    }
+
+    private func artworkBox(side: CGFloat) -> some View {
+        ZStack {
+            CachedArtwork(url: playlist.resolvedArtworkURL(size: .large), size: side, cornerRadius: 10)
+
+            if isHovered || isStartingPlayback {
+                Button(action: playNow) {
+                    Group {
+                        if isStartingPlayback {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .offset(x: 1.5)
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+                    .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .modifier(CardPlayGlass())
+                .scaleEffect(isHovered ? 1.04 : 0.96)
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
+            }
+        }
+        .frame(width: side, height: side)
     }
 
     private func playNow() {

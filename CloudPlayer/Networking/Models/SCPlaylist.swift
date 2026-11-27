@@ -1,7 +1,8 @@
 import Foundation
 
 /// SoundCloud playlist / album / system-playlist item.
-/// Handles SoundCloud's partial track arrays (first ~5 tracks are full objects, remaining are `{ "id": ... }` stubs).
+/// Handles both numeric `id` (regular playlists) and String URN `id` (`system-playlist`),
+/// plus SoundCloud's partial track arrays (first ~5 full tracks + ID-only stubs).
 struct SCPlaylist: Codable, Identifiable, Hashable, Sendable {
     let id: Int?
     let urn: String?
@@ -35,6 +36,63 @@ struct SCPlaylist: Codable, Identifiable, Hashable, Sendable {
         case tracks
     }
 
+    init(
+        id: Int? = nil,
+        urn: String? = nil,
+        title: String,
+        permalinkURL: URL? = nil,
+        artworkURL: URL? = nil,
+        calculatedArtworkURL: URL? = nil,
+        description: String? = nil,
+        isAlbum: Bool? = nil,
+        trackCount: Int? = nil,
+        duration: Int? = nil,
+        likesCount: Int? = nil,
+        genre: String? = nil,
+        user: SCUser? = nil,
+        tracks: [SCTrackOrStub]? = nil
+    ) {
+        self.id = id
+        self.urn = urn
+        self.title = title
+        self.permalinkURL = permalinkURL
+        self.artworkURL = artworkURL
+        self.calculatedArtworkURL = calculatedArtworkURL
+        self.description = description
+        self.isAlbum = isAlbum
+        self.trackCount = trackCount
+        self.duration = duration
+        self.likesCount = likesCount
+        self.genre = genre
+        self.user = user
+        self.tracks = tracks
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        var parsedID: Int?
+        var parsedURN = try c.decodeIfPresent(String.self, forKey: .urn)
+        if let intID = try? c.decodeIfPresent(Int.self, forKey: .id) {
+            parsedID = intID
+        } else if let strID = try? c.decodeIfPresent(String.self, forKey: .id) {
+            parsedURN = parsedURN ?? strID
+        }
+        self.id = parsedID
+        self.urn = parsedURN
+        self.title = try c.decode(String.self, forKey: .title)
+        self.permalinkURL = try c.decodeIfPresent(URL.self, forKey: .permalinkURL)
+        self.artworkURL = try c.decodeIfPresent(URL.self, forKey: .artworkURL)
+        self.calculatedArtworkURL = try c.decodeIfPresent(URL.self, forKey: .calculatedArtworkURL)
+        self.description = try c.decodeIfPresent(String.self, forKey: .description)
+        self.isAlbum = try c.decodeIfPresent(Bool.self, forKey: .isAlbum)
+        self.trackCount = try c.decodeIfPresent(Int.self, forKey: .trackCount)
+        self.duration = try c.decodeIfPresent(Int.self, forKey: .duration)
+        self.likesCount = try c.decodeIfPresent(Int.self, forKey: .likesCount)
+        self.genre = try c.decodeIfPresent(String.self, forKey: .genre)
+        self.user = try c.decodeIfPresent(SCUser.self, forKey: .user)
+        self.tracks = try c.decodeIfPresent([SCTrackOrStub].self, forKey: .tracks)
+    }
+
     var stableID: String {
         if let id { return "pl:\(id)" }
         if let urn { return urn }
@@ -44,6 +102,7 @@ struct SCPlaylist: Codable, Identifiable, Hashable, Sendable {
     var subtitle: String {
         if let user { return user.displayName }
         if let count = trackCount, count > 0 { return "\(count) tracks" }
+        if let desc = description?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty { return desc }
         return isAlbum == true ? "Album" : "Playlist"
     }
 
@@ -65,8 +124,6 @@ struct SCPlaylist: Codable, Identifiable, Hashable, Sendable {
         tracks?.compactMap { $0.fullTrack == nil ? $0.id : nil } ?? []
     }
 
-    /// Merges hydrated tracks from `/users/{id}/playlists_without_albums` into a summary playlist
-    /// from `/me/library/all` so coverless own playlists display their first track's artwork.
     func mergingTracks(from detailed: SCPlaylist) -> SCPlaylist {
         SCPlaylist(
             id: id ?? detailed.id,
@@ -122,6 +179,38 @@ struct SCTrackOrStub: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// Mixed item inside `/mixed-selections` shelves (playlists, system-playlists, or users).
+enum SCSelectionEntry: Codable, Identifiable, Hashable, Sendable {
+    case playlist(SCPlaylist)
+    case user(SCUser)
+
+    var id: String {
+        switch self {
+        case .playlist(let pl): pl.stableID
+        case .user(let u): "user:\(u.id)"
+        }
+    }
+
+    private enum KindKey: String, CodingKey { case kind }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: KindKey.self)
+        let kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        if kind == "user" {
+            self = .user(try SCUser(from: decoder))
+        } else {
+            self = .playlist(try SCPlaylist(from: decoder))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .playlist(let pl): try pl.encode(to: encoder)
+        case .user(let u): try u.encode(to: encoder)
+        }
+    }
+}
+
 /// Home / Discover shelf returned by `/mixed-selections`.
 struct SCMixedSelection: Codable, Identifiable, Sendable {
     let urn: String
@@ -133,23 +222,26 @@ struct SCMixedSelection: Codable, Identifiable, Sendable {
 }
 
 struct SCSelectionItems: Codable, Sendable {
-    let collection: [SCPlaylist]
+    let collection: [SCSelectionEntry]
 
     enum CodingKeys: String, CodingKey {
         case collection
     }
 
-    init(collection: [SCPlaylist]) {
+    init(collection: [SCSelectionEntry]) {
         self.collection = collection
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         var unkeyed = try container.nestedUnkeyedContainer(forKey: .collection)
-        var out: [SCPlaylist] = []
+        var seen = Set<String>()
+        var out: [SCSelectionEntry] = []
         while !unkeyed.isAtEnd {
-            if let item = try? unkeyed.decode(SCPlaylist.self) {
-                out.append(item)
+            if let entry = try? unkeyed.decode(SCSelectionEntry.self) {
+                if seen.insert(entry.id).inserted {
+                    out.append(entry)
+                }
             } else {
                 _ = try? unkeyed.decode(SkipSelectionItem.self)
             }
