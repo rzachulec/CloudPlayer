@@ -5,6 +5,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     let app = AppController()
     private var mainWindow: NSWindow!
+    private var focusWindow: FocusOverlayWindow?
     private var miniPanel: NSPanel!
     private var statusItem: NSStatusItem!
     private var keyMonitor: Any?
@@ -15,6 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         buildMiniPanel()
         buildStatusItem()
         installSpacebarShortcut()
+        app.onFocusOverlayChanged = { [weak self] visible in
+            if visible {
+                self?.showFocusOverlay()
+            } else {
+                self?.hideFocusOverlay()
+            }
+        }
         app.start()
         showMain()
     }
@@ -53,6 +61,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             sender.orderOut(nil)
         }
         return false
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard notification.object as? NSWindow === mainWindow,
+              let fw = focusWindow, fw.isVisible else { return }
+        fw.setFrame(mainWindow.frame, display: true)
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        if let fw = focusWindow, fw.isVisible {
+            fw.setFrame(mainWindow.frame, display: true)
+        }
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        if let fw = focusWindow, fw.isVisible {
+            fw.setFrame(mainWindow.frame, display: true)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -117,7 +143,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         miniPanel = p
     }
 
+    private func showFocusOverlay() {
+        let isFullScreen = mainWindow.styleMask.contains(.fullScreen)
+        let fw: FocusOverlayWindow
+        if let existing = focusWindow {
+            fw = existing
+        } else {
+            fw = FocusOverlayWindow(
+                contentRect: mainWindow.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            fw.isOpaque = false
+            fw.backgroundColor = .clear
+            fw.hasShadow = false
+            fw.isReleasedWhenClosed = false
+            fw.isMovableByWindowBackground = true
+            fw.collectionBehavior = [.fullScreenAuxiliary]
+            focusWindow = fw
+        }
+        let cornerRadius: CGFloat = isFullScreen ? 0 : 16
+        fw.contentView = NSHostingView(rootView: FocusModeView(app: app, cornerRadius: cornerRadius))
+        fw.setFrame(mainWindow.frame, display: true)
+        if fw.parent !== mainWindow {
+            mainWindow.addChildWindow(fw, ordered: .above)
+        }
+        fw.makeKeyAndOrderFront(nil)
+    }
+
+    private func hideFocusOverlay() {
+        guard let fw = focusWindow else { return }
+        if fw.parent === mainWindow {
+            mainWindow.removeChildWindow(fw)
+        }
+        fw.orderOut(nil)
+        fw.contentView = nil
+        mainWindow.makeKeyAndOrderFront(nil)
+    }
+
     private func enterMini() {
+        hideFocusOverlay()
+        app.exitFocusMode()
         mainWindow.orderOut(nil)
         miniPanel.orderFrontRegardless()
     }
@@ -293,4 +360,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
 private final class NativeMiniPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+}
+
+private final class FocusOverlayWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 }

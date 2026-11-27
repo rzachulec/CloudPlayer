@@ -6,6 +6,7 @@ import SwiftUI
 /// - Launched from the media controls pill: cleanly fades in and out.
 struct FocusModeView: View {
     @Bindable var app: AppController
+    var cornerRadius: CGFloat = 16
 
     @State private var isHovering = false
     @State private var isCoverHovered = false
@@ -116,6 +117,7 @@ struct FocusModeView: View {
                 Spacer()
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .ignoresSafeArea()
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }

@@ -150,14 +150,6 @@ private struct NativeMainShell: View {
                 app.router.replaceCurrent(with: .track(newTrack))
             }
         }
-        .onChange(of: app.isFocusMode) { _, focused in
-            setTitlebarHidden(focused)
-        }
-
-            if app.focusTrack != nil {
-                FocusModeView(app: app)
-                    .zIndex(100)
-            }
         }
         .coordinateSpace(name: "cpRootWindow")
     }
@@ -206,28 +198,6 @@ private struct NativeMainShell: View {
     private func toggleSidebar() {
         withAnimation {
             columns = columns == .detailOnly ? .all : .detailOnly
-        }
-    }
-
-    /// Fades and hides the AppKit titlebar container without altering `toolbar.isVisible` or SwiftUI
-    /// toolbar items, so the underlying detail ScrollView's safe-area inset never changes or jumps.
-    private func setTitlebarHidden(_ hidden: Bool) {
-        guard let window = NSApp.windows.first(where: { $0.frameAutosaveName == "MainWindowNative" }) ?? NSApp.mainWindow,
-              let titlebarContainer = window.standardWindowButton(.closeButton)?.superview?.superview else {
-            return
-        }
-        if !hidden {
-            titlebarContainer.isHidden = false
-        }
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
-            titlebarContainer.animator().alphaValue = hidden ? 0 : 1
-        } completionHandler: {
-            Task { @MainActor in
-                if app.isFocusMode == hidden {
-                    titlebarContainer.isHidden = hidden
-                }
-            }
         }
     }
 }

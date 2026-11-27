@@ -28,6 +28,7 @@ final class AppController {
     var focusTrack: SCTrack?
     var isFocusVisible = false
     var focusOriginRect: CGRect?
+    var onFocusOverlayChanged: ((Bool) -> Void)?
     private var focusExitTask: Task<Void, Never>?
 
     var isFocusMode: Bool { isFocusVisible }
@@ -38,6 +39,7 @@ final class AppController {
         focusTrack = target
         focusOriginRect = originRect
         isFocusVisible = true
+        onFocusOverlayChanged?(true)
     }
 
     func exitFocusMode() {
@@ -49,6 +51,7 @@ final class AppController {
             guard !Task.isCancelled, let self, !self.isFocusVisible else { return }
             self.focusTrack = nil
             self.focusOriginRect = nil
+            self.onFocusOverlayChanged?(false)
         }
     }
 
