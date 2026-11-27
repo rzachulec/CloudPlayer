@@ -115,7 +115,7 @@ struct ProfileView: View {
                 }
 
                 // Clickable stat pills (Followers, Following, Likes, Tracks, Playlists)
-                ScrollView(.horizontal, showsIndicators: false) {
+                LiquidHorizontalScroll(compact: true) {
                     HStack(spacing: 7) {
                         if let f = user.followersCount {
                             statPill(icon: "person.fill", label: "\(formatCompactCount(f)) Followers", section: .followers)
@@ -276,7 +276,7 @@ struct ProfileView: View {
             if !albums.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     sectionHeader(.albums, count: albums.count)
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    LiquidHorizontalScroll {
                         LazyHStack(alignment: .top, spacing: 16) {
                             ForEach(albums.prefix(12), id: \.stableID) { album in
                                 PlaylistCard(playlist: album, app: app, fixedSize: 168)
@@ -299,7 +299,7 @@ struct ProfileView: View {
             if !playlists.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     sectionHeader(.playlists, count: playlists.count)
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    LiquidHorizontalScroll {
                         LazyHStack(alignment: .top, spacing: 16) {
                             ForEach(playlists.prefix(12), id: \.stableID) { pl in
                                 PlaylistCard(playlist: pl, app: app, fixedSize: 168)
@@ -331,7 +331,7 @@ struct ProfileView: View {
             if !followingUsers.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     sectionHeader(.following, count: user.followingsCount ?? followingUsers.count)
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    LiquidHorizontalScroll {
                         LazyHStack(alignment: .top, spacing: 14) {
                             ForEach(followingUsers.prefix(12)) { artist in
                                 UserCard(user: artist) {
@@ -348,7 +348,7 @@ struct ProfileView: View {
             if !followerUsers.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     sectionHeader(.followers, count: user.followersCount ?? followerUsers.count)
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    LiquidHorizontalScroll {
                         LazyHStack(alignment: .top, spacing: 14) {
                             ForEach(followerUsers.prefix(12)) { follower in
                                 UserCard(user: follower) {

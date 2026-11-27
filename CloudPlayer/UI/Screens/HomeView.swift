@@ -95,7 +95,7 @@ struct HomeView: View {
                             }
                         }
 
-                        ScrollView(.horizontal, showsIndicators: false) {
+                        LiquidHorizontalScroll {
                             LazyHStack(alignment: .top, spacing: 16) {
                                 ForEach(selection.items?.collection ?? []) { entry in
                                     switch entry {

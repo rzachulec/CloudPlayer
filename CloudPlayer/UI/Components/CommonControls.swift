@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 
 extension Notification.Name {
@@ -286,6 +287,221 @@ struct NativeShareButton: View {
             Label(title, systemImage: "square.and.arrow.up")
         }
         .background(ShareAnchorView(box: anchor))
+    }
+}
+
+// MARK: - Horizontal Scroll with Liquid Glass Navigation Chevrons
+
+@MainActor
+@Observable
+private final class HorizontalScrollController {
+    private(set) var canScrollLeft = false
+    private(set) var canScrollRight = false
+
+    weak var scrollView: NSScrollView? {
+        didSet {
+            guard scrollView !== oldValue else { return }
+            attachObservers()
+            updateScrollState()
+        }
+    }
+
+    private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
+
+    deinit {
+        for obs in observers {
+            NotificationCenter.default.removeObserver(obs)
+        }
+    }
+
+    private func attachObservers() {
+        for obs in observers {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        observers.removeAll()
+        guard let sv = scrollView else { return }
+
+        sv.contentView.postsBoundsChangedNotifications = true
+        let boundsObs = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: sv.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.updateScrollState() }
+        }
+        observers.append(boundsObs)
+
+        if let doc = sv.documentView {
+            doc.postsFrameChangedNotifications = true
+            let frameObs = NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification,
+                object: doc,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.updateScrollState() }
+            }
+            observers.append(frameObs)
+        }
+    }
+
+    func updateScrollState() {
+        guard let sv = scrollView, let doc = sv.documentView else {
+            canScrollLeft = false
+            canScrollRight = false
+            return
+        }
+        let visibleWidth = sv.contentView.bounds.width
+        let contentWidth = doc.bounds.width
+        let offsetX = sv.contentView.bounds.origin.x
+        let maxOffset = max(0, contentWidth - visibleWidth)
+
+        let left = offsetX > 4
+        let right = (maxOffset - offsetX) > 4
+        if canScrollLeft != left { canScrollLeft = left }
+        if canScrollRight != right { canScrollRight = right }
+    }
+
+    func scroll(forward: Bool) {
+        guard let sv = scrollView, let doc = sv.documentView else { return }
+        let clip = sv.contentView
+        let visibleWidth = clip.bounds.width
+        let maxOffset = max(0, doc.bounds.width - visibleWidth)
+        let step = max(180, visibleWidth * 0.78)
+        let currentX = clip.bounds.origin.x
+        let targetX = forward
+            ? min(maxOffset, currentX + step)
+            : max(0, currentX - step)
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.32
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            clip.animator().setBoundsOrigin(NSPoint(x: targetX, y: clip.bounds.origin.y))
+        } completionHandler: { [weak self] in
+            Task { @MainActor in
+                sv.reflectScrolledClipView(clip)
+                self?.updateScrollState()
+            }
+        }
+    }
+}
+
+private struct HorizontalScrollProbe: NSViewRepresentable {
+    let controller: HorizontalScrollController
+
+    func makeNSView(context: Context) -> NSView {
+        let view = ProbeNSView()
+        view.onAttach = { [weak controller] sv in
+            controller?.scrollView = sv
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let sv = nsView.enclosingScrollView {
+            controller.scrollView = sv
+            controller.updateScrollState()
+        }
+    }
+
+    private final class ProbeNSView: NSView {
+        var onAttach: ((NSScrollView?) -> Void)?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            onAttach?(enclosingScrollView)
+        }
+        override func viewDidMoveToSuperview() {
+            super.viewDidMoveToSuperview()
+            onAttach?(enclosingScrollView)
+        }
+    }
+}
+
+private struct ShelfChevronButton: View {
+    let symbol: String
+    let compact: Bool
+    let help: String
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        let diameter: CGFloat = compact ? 24 : 34
+        let iconSize: CGFloat = compact ? 10 : 13
+
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: iconSize, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: diameter, height: diameter)
+                .contentShape(Circle())
+                .modifier(CircleGlassSurface())
+                .scaleEffect(hovered ? 1.07 : 1.0)
+                .animation(.easeOut(duration: 0.14), value: hovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(help)
+    }
+}
+
+private struct CircleGlassSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.28), radius: 8, y: 3)
+        }
+    }
+}
+
+/// Horizontal `ScrollView` with hover-revealed Liquid Glass left/right scroll buttons that
+/// smoothly page through shelves and hide automatically at the scroll boundaries.
+struct LiquidHorizontalScroll<Content: View>: View {
+    var compact: Bool = false
+    @ViewBuilder let content: () -> Content
+
+    @State private var controller = HorizontalScrollController()
+    @State private var isHovered = false
+
+    var body: some View {
+        ZStack {
+            ScrollView(.horizontal, showsIndicators: false) {
+                content()
+                    .background(HorizontalScrollProbe(controller: controller))
+            }
+
+            HStack {
+                if controller.canScrollLeft {
+                    ShelfChevronButton(symbol: "chevron.left", compact: compact, help: "Scroll Left") {
+                        controller.scroll(forward: false)
+                    }
+                    .padding(.leading, compact ? 2 : 6)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+
+                Spacer(minLength: 0)
+
+                if controller.canScrollRight {
+                    ShelfChevronButton(symbol: "chevron.right", compact: compact, help: "Scroll Right") {
+                        controller.scroll(forward: true)
+                    }
+                    .padding(.trailing, compact ? 2 : 6)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+            }
+            .opacity(isHovered ? 1 : 0)
+            .allowsHitTesting(isHovered)
+            .animation(.easeOut(duration: 0.16), value: isHovered)
+            .animation(.easeOut(duration: 0.16), value: controller.canScrollLeft)
+            .animation(.easeOut(duration: 0.16), value: controller.canScrollRight)
+        }
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering { controller.updateScrollState() }
+        }
     }
 }
 

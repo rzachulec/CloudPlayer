@@ -238,7 +238,7 @@ struct SearchView: View {
             }
 
             if !tagFacets.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
+                LiquidHorizontalScroll(compact: true) {
                     HStack(spacing: 6) {
                         ForEach(tagFacets.prefix(16)) { facet in
                             let isSelected = selectedTag == facet.value
