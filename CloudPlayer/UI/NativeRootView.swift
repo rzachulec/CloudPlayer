@@ -94,7 +94,7 @@ private struct NativeMainShell: View {
                 .padding(.trailing, app.audio.queueVisible ? 320 : 0)
                 .animation(.easeOut(duration: 0.22), value: app.audio.queueVisible)
             }
-            .frame(minWidth: 520, minHeight: 500)
+            .frame(minWidth: 740, minHeight: 600)
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button(action: toggleSidebar) {
