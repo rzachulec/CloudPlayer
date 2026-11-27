@@ -48,7 +48,7 @@ struct TrackDetailView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
-                    heroCard(minHeight: heroHeight)
+                    heroCard(containerSize: geo.size, minHeight: heroHeight)
 
                     if isWide {
                         HStack(alignment: .top, spacing: 24) {
@@ -91,18 +91,24 @@ struct TrackDetailView: View {
 
     // MARK: - Full-Viewport Blurred Hero + Waveform Comments
 
-    private func heroCard(minHeight: CGFloat) -> some View {
+    private func heroCard(containerSize: CGSize, minHeight: CGFloat) -> some View {
         let progress = isCurrent && app.audio.duration > 0 ? app.audio.position / app.audio.duration : 0
         let duration = isCurrent && app.audio.duration > 0 ? app.audio.duration : track.durationSeconds
+        let artSize = min(max(min(containerSize.width * 0.27, containerSize.height * 0.44), 170), 380)
+        let isLarge = artSize >= 270
 
         return VStack(alignment: .leading, spacing: 20) {
             Spacer(minLength: 8)
 
-            HStack(alignment: .center, spacing: 24) {
-                CachedArtwork(url: track.resolvedArtworkURL(size: .large), size: 196, cornerRadius: 14)
-                    .shadow(color: .black.opacity(0.40), radius: 20, y: 8)
+            HStack(alignment: .center, spacing: isLarge ? 32 : 22) {
+                CachedArtwork(
+                    url: track.resolvedArtworkURL(size: .large),
+                    size: artSize,
+                    cornerRadius: isLarge ? 18 : 14
+                )
+                .shadow(color: .black.opacity(0.42), radius: isLarge ? 26 : 18, y: 10)
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: isLarge ? 10 : 8) {
                     HStack(spacing: 6) {
                         if let genre = track.genre, !genre.isEmpty {
                             Text("#\(genre)")
@@ -123,7 +129,7 @@ struct TrackDetailView: View {
                     }
 
                     Text(track.title)
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.system(size: isLarge ? 34 : 26, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
 
@@ -133,7 +139,7 @@ struct TrackDetailView: View {
                         }
                     } label: {
                         Text(track.artistName)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: isLarge ? 18 : 15, weight: .medium))
                             .foregroundStyle(.white.opacity(0.84))
                     }
                     .buttonStyle(.plain)
