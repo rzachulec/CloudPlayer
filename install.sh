@@ -113,23 +113,25 @@ USAGE
   ditto -x -k "$tmp/CloudPlayer.zip" "$tmp/unpacked" || fail "The download isn't a valid zip."
   [ -d "$tmp/unpacked/CloudPlayer.app" ] || fail "The download doesn't contain CloudPlayer.app."
 
-  # Quit the copy being replaced (only that one: a build running from Xcode is left alone).
-  local binary="$app/Contents/MacOS/CloudPlayer"
-  if pgrep -qf "^$binary" ; then
+  # Quit the copy being replaced in the current user's session
+  # (leaves any Xcode Debug build or another macOS user's session alone).
+  local uid binary="$app/Contents/MacOS/CloudPlayer"
+  uid="$(id -u)"
+  if pgrep -u "$uid" -qf "^$binary" ; then
     step "Quitting the running CloudPlayer"
     # Try graceful AppleScript quit first, then SIGTERM/SIGKILL to that exact binary path.
     osascript -e "tell application (POSIX file \"$app\" as text) to quit" >/dev/null 2>&1 || true
     local i
-    for i in $(seq 1 6); do pgrep -qf "^$binary" || break; sleep 0.25; done
-    if pgrep -qf "^$binary"; then
-      pkill -TERM -f "^$binary" 2>/dev/null || true
-      for i in $(seq 1 12); do pgrep -qf "^$binary" || break; sleep 0.25; done
+    for i in $(seq 1 6); do pgrep -u "$uid" -qf "^$binary" || break; sleep 0.25; done
+    if pgrep -u "$uid" -qf "^$binary"; then
+      pkill -u "$uid" -TERM -f "^$binary" 2>/dev/null || true
+      for i in $(seq 1 12); do pgrep -u "$uid" -qf "^$binary" || break; sleep 0.25; done
     fi
-    if pgrep -qf "^$binary"; then
-      pkill -KILL -f "^$binary" 2>/dev/null || true
+    if pgrep -u "$uid" -qf "^$binary"; then
+      pkill -u "$uid" -KILL -f "^$binary" 2>/dev/null || true
       sleep 0.5
     fi
-    pgrep -qf "^$binary" && fail "CloudPlayer didn't quit. Quit it and run this again."
+    pgrep -u "$uid" -qf "^$binary" && fail "CloudPlayer didn't quit. Quit it and run this again."
   fi
 
   local sudo=""
