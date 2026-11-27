@@ -1,7 +1,30 @@
 import SwiftUI
 
+private enum CollectionFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case created = "Created"
+    case liked = "Saved"
+    var id: Self { self }
+}
+
+private enum CollectionSort: String, CaseIterable, Identifiable {
+    case recent = "Recent"
+    case title = "Title"
+    case trackCount = "Most Tracks"
+    var id: Self { self }
+}
+
+private enum CollectionDisplayMode: String, CaseIterable, Identifiable {
+    case tiles
+    case list
+
+    var id: Self { self }
+    var symbol: String { self == .tiles ? "square.grid.2x2" : "list.bullet" }
+    var label: String { self == .tiles ? "Tiles" : "List" }
+}
+
 /// Native Playlists / Albums library screen backed by `/me/library/all` + `/users/{id}/playlists_without_albums`
-/// so user-created playlists without a custom cover automatically display their first track's artwork.
+/// with ownership filters, sorting, instant search, Tiles/List view modes, and cover hydration.
 struct LibraryCollectionsView: View {
     enum Kind {
         case playlists
@@ -15,21 +38,57 @@ struct LibraryCollectionsView: View {
     let kind: Kind
     @Bindable var app: AppController
 
+    @AppStorage("cp.viewMode.collections") private var viewModeRaw: String = CollectionDisplayMode.tiles.rawValue
     @State private var items: [SCPlaylist] = []
     @State private var nextHref: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var errorMessage: String?
+    @State private var ownershipFilter: CollectionFilter = .all
+    @State private var sortOrder: CollectionSort = .recent
+    @State private var filterText = ""
 
-    private let gridColumns = [GridItem(.adaptive(minimum: 165, maximum: 220), spacing: 18)]
+    private let gridColumns = [GridItem(.adaptive(minimum: 168, maximum: 225), spacing: 18)]
+
+    private var viewMode: CollectionDisplayMode {
+        CollectionDisplayMode(rawValue: viewModeRaw) ?? .tiles
+    }
+
+    private var displayedItems: [SCPlaylist] {
+        let uid = app.currentUser?.id
+        var result = items
+
+        if kind == .playlists, let uid {
+            switch ownershipFilter {
+            case .all: break
+            case .created: result = result.filter { $0.user?.id == uid }
+            case .liked: result = result.filter { $0.user?.id != uid }
+            }
+        }
+
+        let q = filterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !q.isEmpty {
+            result = result.filter {
+                $0.title.lowercased().contains(q)
+                    || ($0.user?.displayName.lowercased().contains(q) ?? false)
+                    || ($0.genre?.lowercased().contains(q) ?? false)
+            }
+        }
+
+        switch sortOrder {
+        case .recent: break
+        case .title:
+            result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .trackCount:
+            result.sort { ($0.trackCount ?? 0) > ($1.trackCount ?? 0) }
+        }
+        return result
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(kind.title).font(.system(size: 24, weight: .bold))
-                    Text(kind.subtitle).font(.system(size: 12)).foregroundStyle(.secondary)
-                }
+                header
 
                 if isLoading && items.isEmpty {
                     TileGridSkeleton()
@@ -39,20 +98,32 @@ struct LibraryCollectionsView: View {
                         Button("Retry") { Task { await refresh() } }.buttonStyle(.borderedProminent)
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
-                } else if items.isEmpty {
-                    Text("No \(kind.title.lowercased()) in your library yet.")
+                } else if displayedItems.isEmpty {
+                    Text(filterText.isEmpty ? "No \(kind.title.lowercased()) in your library yet." : "No \(kind.title.lowercased()) match “\(filterText)”.")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
-                    LazyVGrid(columns: gridColumns, spacing: 20) {
-                        ForEach(items, id: \.stableID) { playlist in
-                            PlaylistCard(playlist: playlist, app: app)
-                                .onAppear {
-                                    if playlist.stableID == items.last?.stableID { loadMore() }
-                                }
+                    if viewMode == .tiles {
+                        LazyVGrid(columns: gridColumns, spacing: 20) {
+                            ForEach(displayedItems, id: \.stableID) { playlist in
+                                PlaylistCard(playlist: playlist, app: app)
+                                    .onAppear {
+                                        if playlist.stableID == items.last?.stableID { loadMore() }
+                                    }
+                            }
+                        }
+                    } else {
+                        LazyVStack(spacing: 4) {
+                            ForEach(displayedItems, id: \.stableID) { playlist in
+                                CollectionListRow(playlist: playlist, app: app)
+                                    .onAppear {
+                                        if playlist.stableID == items.last?.stableID { loadMore() }
+                                    }
+                            }
                         }
                     }
+
                     if isLoadingMore {
                         HStack {
                             Spacer()
@@ -70,6 +141,111 @@ struct LibraryCollectionsView: View {
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: "\(kind.cacheKeySuffix)|\(app.currentUser?.id ?? 0)") {
             await loadStaleWhileRevalidate()
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(kind.title).font(.system(size: 24, weight: .bold))
+                    Text(items.isEmpty ? kind.subtitle : "\(displayedItems.count) \(kind.title.lowercased())")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 10)
+
+                // Instant filter
+                HStack(spacing: 5) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    TextField("Filter", text: $filterText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .frame(width: 120)
+                    if !filterText.isEmpty {
+                        Button { filterText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(.quaternary.opacity(0.6), in: Capsule())
+
+                // Sort menu
+                Menu {
+                    ForEach(CollectionSort.allCases) { option in
+                        Button {
+                            sortOrder = option
+                        } label: {
+                            if sortOrder == option {
+                                Label(option.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(option.rawValue)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.arrow.down").font(.system(size: 10.5))
+                        Text(sortOrder.rawValue).font(.system(size: 11.5, weight: .medium))
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.quaternary.opacity(0.6), in: Capsule())
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                // Tiles / List toggle
+                HStack(spacing: 2) {
+                    ForEach(CollectionDisplayMode.allCases) { mode in
+                        Button {
+                            withAnimation(.easeOut(duration: 0.16)) { viewModeRaw = mode.rawValue }
+                        } label: {
+                            Image(systemName: mode.symbol)
+                                .font(.system(size: 12, weight: .medium))
+                                .frame(width: 26, height: 22)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(viewMode == mode ? Color.accentColor.opacity(0.18) : Color.clear)
+                                )
+                                .foregroundStyle(viewMode == mode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        }
+                        .buttonStyle(.plain)
+                        .help(mode.label)
+                    }
+                }
+                .padding(2)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
+            if kind == .playlists {
+                HStack(spacing: 6) {
+                    ForEach(CollectionFilter.allCases) { f in
+                        let selected = ownershipFilter == f
+                        Button {
+                            withAnimation(.easeOut(duration: 0.15)) { ownershipFilter = f }
+                        } label: {
+                            Text(f.rawValue)
+                                .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
+                                .foregroundStyle(selected ? Color.white : Color.primary)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 4)
+                                .background(
+                                    Capsule().fill(selected ? Color.accentColor : Color.primary.opacity(0.08))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
     }
 
@@ -181,6 +357,94 @@ struct LibraryCollectionsView: View {
                     .filter { !seen.contains($0.stableID) }
                 items.append(contentsOf: more)
                 nextHref = page.nextHref
+            }
+        }
+    }
+}
+
+/// Compact list row for Playlists & Albums view mode.
+private struct CollectionListRow: View {
+    let playlist: SCPlaylist
+    @Bindable var app: AppController
+    @State private var isHovered = false
+    @State private var isStarting = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                CachedArtwork(url: playlist.resolvedArtworkURL(size: .medium), size: 50, cornerRadius: 7)
+                if isHovered || isStarting {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(.black.opacity(0.42))
+                        .frame(width: 50, height: 50)
+                    Button(action: playNow) {
+                        if isStarting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .offset(x: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playlist.title)
+                    .font(.system(size: 13.5, weight: .medium))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if let user = playlist.user {
+                        Text(user.displayName)
+                    }
+                    if let count = playlist.trackCount, count > 0 {
+                        Text("· \(count) tracks")
+                    }
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            if let dur = playlist.duration, dur > 0 {
+                Text(formatTime(Double(dur) / 1000.0))
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(isHovered ? Color.primary.opacity(0.05) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .onTapGesture {
+            app.router.navigate(to: .playlist(playlist))
+        }
+    }
+
+    private func playNow() {
+        guard !isStarting else { return }
+        let ready = playlist.hydratedTracks
+        if let first = ready.first, playlist.missingTrackIDs.isEmpty {
+            app.audio.play(track: first, inContext: ready, contextTitle: playlist.title)
+            return
+        }
+        isStarting = true
+        Task {
+            defer { isStarting = false }
+            if let resolved = try? await app.api.resolveTracks(for: playlist), let first = resolved.first {
+                app.audio.play(track: first, inContext: resolved, contextTitle: playlist.title)
             }
         }
     }
