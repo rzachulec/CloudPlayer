@@ -1,8 +1,9 @@
+import AppKit
 import NukeUI
 import SwiftUI
 
-enum ProfileTab: String, CaseIterable, Identifiable {
-    case popular = "Popular"
+enum ProfileDrilldownSection: String, Identifiable {
+    case popular = "Popular Tracks"
     case tracks = "Tracks"
     case albums = "Albums"
     case playlists = "Playlists"
@@ -11,22 +12,22 @@ enum ProfileTab: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
-/// Native Artist / User Profile screen with instant stub rendering, optimistic Follow button,
-/// and cached tabs (Popular, Tracks, Albums, Playlists, Likes).
+/// Apple Music–style native Artist / User Profile:
+/// - Full-width banner hero card (artist's SoundCloud banner visual or blurred avatar fallback)
+/// - Overview with curated vertical shelves and `"Title ›"` drill-downs (no underline tab bar)
+/// - Drill-down sub-pages with `"‹ Artist · Section"` back header.
 struct ProfileView: View {
     let initialUser: SCUser
     @Bindable var app: AppController
 
     @State private var user: SCUser
-    @State private var tab: ProfileTab = .popular
+    @State private var drilldown: ProfileDrilldownSection?
     @State private var popularTracks: [SCTrack] = []
     @State private var allTracks: [SCTrack] = []
     @State private var albums: [SCPlaylist] = []
     @State private var playlists: [SCPlaylist] = []
     @State private var likedTracks: [SCTrack] = []
-
-    @State private var loadedTabs: Set<ProfileTab> = []
-    @State private var isLoadingTab = false
+    @State private var isLoading = false
 
     private let gridColumns = [GridItem(.adaptive(minimum: 165, maximum: 220), spacing: 18)]
 
@@ -41,38 +42,30 @@ struct ProfileView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                Picker("Section", selection: $tab) {
-                    ForEach(ProfileTab.allCases) { t in
-                        Text(t.rawValue).tag(t)
-                    }
+            VStack(alignment: .leading, spacing: 24) {
+                if let section = drilldown {
+                    drilldownView(section)
+                } else {
+                    bannerHero
+                    overviewShelves
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 420)
-
-                tabContent
             }
             .padding(.horizontal, 22)
-            .padding(.top, 16)
+            .padding(.top, 14)
             .padding(.bottom, 96)
         }
         .background(Color(nsColor: .textBackgroundColor))
         .task(id: initialUser.id) {
             user = initialUser
-            loadedTabs = []
-            if let full = try? await app.api.fetchUser(id: initialUser.id) {
-                user = full
-            }
-        }
-        .task(id: "\(initialUser.id)|\(tab.rawValue)") {
-            await loadTabIfNeeded()
+            drilldown = nil
+            await loadOverview()
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 20) {
+    // MARK: - Banner Hero
+
+    private var bannerHero: some View {
+        HStack(alignment: .bottom, spacing: 20) {
             LazyImage(url: user.avatarURL(size: .large)) { state in
                 if let image = state.image {
                     image.resizable().aspectRatio(contentMode: .fill)
@@ -81,50 +74,53 @@ struct ProfileView: View {
                         .overlay(Image(systemName: "person.fill").font(.largeTitle).foregroundStyle(.secondary))
                 }
             }
-            .frame(width: 112, height: 112)
+            .frame(width: 118, height: 118)
             .clipShape(Circle())
-            .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
+            .overlay(Circle().strokeBorder(.white.opacity(0.28), lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(user.displayName)
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
                     if user.verified == true {
                         Image(systemName: "checkmark.seal.fill")
-                            .foregroundStyle(.tint)
+                            .font(.system(size: 16))
+                            .foregroundStyle(.white)
                     }
                 }
 
                 let loc = [user.city, user.countryCode].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
-                if !loc.isEmpty {
-                    Text(loc)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 16) {
-                    if let f = user.followersCount {
-                        Text("\(formatCompactCount(f)) followers")
-                    }
-                    if let fg = user.followingsCount {
-                        Text("\(formatCompactCount(fg)) following")
-                    }
-                    if let t = user.trackCount {
-                        Text("\(t) tracks")
-                    }
+                HStack(spacing: 12) {
+                    if !loc.isEmpty { Text(loc) }
+                    if let f = user.followersCount { Text("\(formatCompactCount(f)) followers") }
+                    if let fg = user.followingsCount { Text("\(formatCompactCount(fg)) following") }
+                    if let t = user.trackCount { Text("\(t) tracks") }
                 }
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.82))
 
                 if let bio = user.description?.trimmingCharacters(in: .whitespacesAndNewlines), !bio.isEmpty {
                     Text(bio)
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.76))
                         .lineLimit(2)
-                        .padding(.top, 2)
+                        .padding(.top, 1)
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    let playList = popularTracks.isEmpty ? allTracks : popularTracks
+                    if !playList.isEmpty {
+                        Button {
+                            app.audio.play(track: playList[0], inContext: playList, contextTitle: user.displayName)
+                        } label: {
+                            Label("Play", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+
                     if !isSelf {
                         Button {
                             let willFollow = !isFollowing
@@ -134,19 +130,13 @@ struct ProfileView: View {
                                 artworkURL: user.avatarURL(size: .small)
                             )
                         } label: {
-                            Label(isFollowing ? "Following" : "Follow", systemImage: isFollowing ? "person.fill.checkmark" : "person.badge.plus")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(isFollowing ? .secondary : .accentColor)
-                    }
-
-                    if let tracks = activeTrackList, !tracks.isEmpty {
-                        Button {
-                            app.audio.play(track: tracks[0], inContext: tracks, contextTitle: user.displayName)
-                        } label: {
-                            Label("Play", systemImage: "play.fill")
+                            Label(
+                                isFollowing ? "Following" : "Follow",
+                                systemImage: isFollowing ? "person.fill.checkmark" : "person.badge.plus"
+                            )
                         }
                         .buttonStyle(.bordered)
+                        .tint(.white)
                     }
 
                     if let url = user.permalinkURL {
@@ -156,17 +146,227 @@ struct ProfileView: View {
                             Image(systemName: "safari")
                         }
                         .buttonStyle(.bordered)
+                        .tint(.white)
                         .help("Open on SoundCloud")
                     }
                 }
                 .padding(.top, 4)
             }
-            Spacer()
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 22)
+        .frame(minHeight: 205, alignment: .bottomLeading)
+        .background {
+            if let banner = user.bannerURL {
+                LazyImage(url: banner) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        blurredAvatarBackdrop
+                    }
+                }
+                .overlay(
+                    LinearGradient(
+                        colors: [.black.opacity(0.18), .black.opacity(0.72)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+            } else {
+                blurredAvatarBackdrop
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
+        )
+    }
+
+    private var blurredAvatarBackdrop: some View {
+        LazyImage(url: user.avatarURL(size: .large)) { state in
+            if let image = state.image {
+                image.resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Color.accentColor.opacity(0.3)
+            }
+        }
+        .blur(radius: 44)
+        .scaleEffect(1.3)
+        .overlay(
+            LinearGradient(
+                colors: [.black.opacity(0.28), .black.opacity(0.65)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    // MARK: - Curated Overview Shelves
+
+    @ViewBuilder
+    private var overviewShelves: some View {
+        if isLoading && popularTracks.isEmpty && allTracks.isEmpty && albums.isEmpty && playlists.isEmpty {
+            LazyVStack(spacing: 6) {
+                ForEach(0..<8, id: \.self) { _ in TrackRowSkeleton() }
+            }
+        } else {
+            if !popularTracks.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionHeader(.popular, count: popularTracks.count)
+                    LazyVStack(spacing: 2) {
+                        ForEach(popularTracks.prefix(5)) { track in
+                            trackRow(track, context: popularTracks)
+                        }
+                    }
+                }
+            }
+
+            if !albums.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionHeader(.albums, count: albums.count)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 16) {
+                            ForEach(albums.prefix(12), id: \.stableID) { album in
+                                PlaylistCard(playlist: album, app: app, fixedSize: 168)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
+            if !allTracks.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionHeader(.tracks, count: allTracks.count)
+                    LazyVStack(spacing: 2) {
+                        ForEach(allTracks.prefix(5)) { track in
+                            trackRow(track, context: allTracks)
+                        }
+                    }
+                }
+            }
+
+            if !playlists.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionHeader(.playlists, count: playlists.count)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 16) {
+                            ForEach(playlists.prefix(12), id: \.stableID) { pl in
+                                PlaylistCard(playlist: pl, app: app, fixedSize: 168)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
+            if !likedTracks.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionHeader(.likes, count: likedTracks.count)
+                    LazyVStack(spacing: 2) {
+                        ForEach(likedTracks.prefix(5)) { track in
+                            trackRow(track, context: likedTracks)
+                        }
+                    }
+                }
+            }
         }
     }
 
-    private var activeTrackList: [SCTrack]? {
-        switch tab {
+    private func sectionHeader(_ section: ProfileDrilldownSection, count: Int) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.16)) { drilldown = section }
+        } label: {
+            HStack(spacing: 5) {
+                Text(section.rawValue)
+                    .font(.system(size: 18, weight: .bold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if count > 5 {
+                    Text("See All")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Drill-Down Sub-Page
+
+    @ViewBuilder
+    private func drilldownView(_ section: ProfileDrilldownSection) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                withAnimation(.easeOut(duration: 0.16)) { drilldown = nil }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(user.displayName)
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            Text("·").foregroundStyle(.tertiary)
+
+            Text(section.rawValue)
+                .font(.system(size: 20, weight: .bold))
+
+            Spacer()
+
+            if let list = tracksFor(section), !list.isEmpty {
+                Button {
+                    app.audio.play(track: list[0], inContext: list, contextTitle: "\(user.displayName) — \(section.rawValue)")
+                } label: {
+                    Label("Play", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                Button {
+                    app.audio.playShuffled(tracks: list, contextTitle: "\(user.displayName) — \(section.rawValue)")
+                } label: {
+                    Label("Shuffle", systemImage: "shuffle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+
+        switch section {
+        case .popular:
+            LazyVStack(spacing: 2) {
+                ForEach(popularTracks) { trackRow($0, context: popularTracks) }
+            }
+        case .tracks:
+            LazyVStack(spacing: 2) {
+                ForEach(allTracks) { trackRow($0, context: allTracks) }
+            }
+        case .likes:
+            LazyVStack(spacing: 2) {
+                ForEach(likedTracks) { trackRow($0, context: likedTracks) }
+            }
+        case .albums:
+            LazyVGrid(columns: gridColumns, spacing: 20) {
+                ForEach(albums, id: \.stableID) { PlaylistCard(playlist: $0, app: app) }
+            }
+        case .playlists:
+            LazyVGrid(columns: gridColumns, spacing: 20) {
+                ForEach(playlists, id: \.stableID) { PlaylistCard(playlist: $0, app: app) }
+            }
+        }
+    }
+
+    private func tracksFor(_ section: ProfileDrilldownSection) -> [SCTrack]? {
+        switch section {
         case .popular: popularTracks
         case .tracks: allTracks
         case .likes: likedTracks
@@ -174,94 +374,41 @@ struct ProfileView: View {
         }
     }
 
-    @ViewBuilder
-    private var tabContent: some View {
-        if isLoadingTab && !loadedTabs.contains(tab) {
-            if tab == .albums || tab == .playlists {
-                TileGridSkeleton()
-            } else {
-                LazyVStack(spacing: 4) {
-                    ForEach(0..<10, id: \.self) { _ in TrackRowSkeleton() }
+    private func trackRow(_ track: SCTrack, context: [SCTrack]) -> some View {
+        NativeTrackRow(
+            track: track,
+            app: app,
+            mode: .compact,
+            onPlay: {
+                app.audio.play(track: track, inContext: context, contextTitle: user.displayName)
+            },
+            onArtistTap: { artist in
+                if artist.id != user.id {
+                    app.router.navigate(to: .user(artist))
                 }
             }
-        } else {
-            switch tab {
-            case .popular:
-                trackListView(popularTracks, empty: "No popular tracks yet.")
-            case .tracks:
-                trackListView(allTracks, empty: "No uploaded tracks yet.")
-            case .likes:
-                trackListView(likedTracks, empty: "No liked tracks visible.")
-            case .albums:
-                collectionGrid(albums, empty: "No albums.")
-            case .playlists:
-                collectionGrid(playlists, empty: "No playlists.")
-            }
-        }
+        )
     }
 
-    @ViewBuilder
-    private func trackListView(_ list: [SCTrack], empty: String) -> some View {
-        if list.isEmpty {
-            Text(empty)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 200)
-        } else {
-            LazyVStack(spacing: 2) {
-                ForEach(list) { track in
-                    NativeTrackRow(
-                        track: track,
-                        app: app,
-                        mode: .compact,
-                        onPlay: {
-                            app.audio.play(track: track, inContext: list, contextTitle: user.displayName)
-                        },
-                        onArtistTap: { artist in
-                            if artist.id != user.id {
-                                app.router.navigate(to: .user(artist))
-                            }
-                        }
-                    )
-                }
-            }
-        }
-    }
+    // MARK: - Parallel Overview Loading
 
-    @ViewBuilder
-    private func collectionGrid(_ list: [SCPlaylist], empty: String) -> some View {
-        if list.isEmpty {
-            Text(empty)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 200)
-        } else {
-            LazyVGrid(columns: gridColumns, spacing: 20) {
-                ForEach(list, id: \.stableID) { pl in
-                    PlaylistCard(playlist: pl, app: app)
-                }
-            }
-        }
-    }
+    private func loadOverview() async {
+        isLoading = true
+        defer { isLoading = false }
 
-    private func loadTabIfNeeded() async {
-        guard !loadedTabs.contains(tab) else { return }
-        isLoadingTab = true
-        defer { isLoadingTab = false }
+        let uid = initialUser.id
+        async let userTask = app.api.fetchUser(id: uid)
+        async let popularTask = app.api.fetchUserTopTracks(userID: uid, limit: 30)
+        async let tracksTask = app.api.fetchUserTracks(userID: uid, limit: 40)
+        async let albumsTask = app.api.fetchUserAlbums(userID: uid, limit: 30)
+        async let playlistsTask = app.api.fetchUserOwnPlaylists(userID: uid, limit: 30)
+        async let likesTask = app.api.fetchTrackLikes(userID: uid, limit: 30)
 
-        switch tab {
-        case .popular:
-            popularTracks = (try? await app.api.fetchUserTopTracks(userID: user.id)) ?? []
-        case .tracks:
-            allTracks = (try? await app.api.fetchUserTracks(userID: user.id).collection) ?? []
-        case .albums:
-            albums = (try? await app.api.fetchUserAlbums(userID: user.id).collection) ?? []
-        case .playlists:
-            playlists = (try? await app.api.fetchUserOwnPlaylists(userID: user.id)) ?? []
-        case .likes:
-            let page = try? await app.api.fetchTrackLikes(userID: user.id, limit: 50)
-            likedTracks = page?.collection.compactMap(\.track) ?? []
-        }
-        loadedTabs.insert(tab)
+        if let full = try? await userTask { user = full }
+        if let pop = try? await popularTask { popularTracks = pop }
+        if let tr = try? await tracksTask { allTracks = tr.collection }
+        if let alb = try? await albumsTask { albums = alb.collection }
+        if let pls = try? await playlistsTask { playlists = pls }
+        if let lk = try? await likesTask { likedTracks = lk.collection.compactMap(\.track) }
     }
 }

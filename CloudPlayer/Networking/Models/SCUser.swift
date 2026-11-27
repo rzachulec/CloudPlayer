@@ -18,6 +18,7 @@ struct SCUser: Codable, Identifiable, Hashable, Sendable {
     let city: String?
     let countryCode: String?
     let verified: Bool?
+    let visuals: SCUserVisuals?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -35,6 +36,7 @@ struct SCUser: Codable, Identifiable, Hashable, Sendable {
         case city
         case countryCode = "country_code"
         case verified
+        case visuals
     }
 
     var displayName: String {
@@ -44,8 +46,26 @@ struct SCUser: Codable, Identifiable, Hashable, Sendable {
         return username
     }
 
+    var bannerURL: URL? {
+        guard visuals?.enabled != false else { return nil }
+        return visuals?.visuals?.first?.visualURL
+    }
+
     func avatarURL(size: SCImageSize) -> URL? {
         avatarURL?.scImageVariant(size)
+    }
+}
+
+struct SCUserVisuals: Codable, Hashable, Sendable {
+    let enabled: Bool?
+    let visuals: [SCVisualItem]?
+}
+
+struct SCVisualItem: Codable, Hashable, Sendable {
+    let visualURL: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case visualURL = "visual_url"
     }
 }
 
