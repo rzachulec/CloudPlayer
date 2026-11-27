@@ -3,6 +3,8 @@ name: Build macOS app
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,8 +15,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    name: Test
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Check WebKit isolation
+        run: |
+          MATCHES=$(grep -rlE '^[[:space:]]*(@[[:alpha:]_]+[[:space:]]+)*import[[:space:]]+WebKit([[:space:].]|$)' CloudPlayer/ || true)
+          UNEXPECTED=$(printf '%s\n' "$MATCHES" | grep -vx 'CloudPlayer/Auth/DisposableLoginSheet.swift' || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "Error: WebKit import is only allowed in CloudPlayer/Auth/DisposableLoginSheet.swift, found in:"
+            echo "$UNEXPECTED"
+            exit 1
+          fi
+          if ! printf '%s\n' "$MATCHES" | grep -qx 'CloudPlayer/Auth/DisposableLoginSheet.swift'; then
+            echo "Error: Expected CloudPlayer/Auth/DisposableLoginSheet.swift to import WebKit."
+            exit 1
+          fi
+
+      - name: Cache SwiftPM packages
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('CloudPlayer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') || hashFiles('CloudPlayer.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Run unit tests
+        run: |
+          xcodebuild \
+            -project CloudPlayer.xcodeproj \
+            -scheme CloudPlayer \
+            -configuration Debug \
+            -derivedDataPath build \
+            test
+
   build:
     name: Build (${{ matrix.label }})
+    needs: test
     runs-on: macos-26
     strategy:
       fail-fast: false
@@ -34,6 +79,14 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+
+      - name: Cache SwiftPM packages
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('CloudPlayer.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') || hashFiles('CloudPlayer.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
 
       - name: Build (${{ matrix.arch }})
         run: |
@@ -114,7 +167,7 @@ jobs:
   release:
     name: Publish "latest" release
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
