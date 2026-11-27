@@ -95,7 +95,7 @@ struct LibraryCollectionsView: View {
                 } else if let errorMessage, items.isEmpty {
                     VStack(spacing: 10) {
                         Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
-                        Button("Retry") { Task { await refresh() } }.buttonStyle(.borderedProminent)
+                        Button("Retry") { Task { await refresh() } }.liquidGlassButton(prominent: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
                 } else if displayedItems.isEmpty {
@@ -157,26 +157,7 @@ struct LibraryCollectionsView: View {
                 Spacer(minLength: 10)
 
                 // Instant filter
-                HStack(spacing: 5) {
-                    Image(systemName: "line.3.horizontal.decrease")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    TextField("Filter", text: $filterText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .frame(width: 120)
-                    if !filterText.isEmpty {
-                        Button { filterText = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(.quaternary.opacity(0.6), in: Capsule())
+                LiquidFilterField(text: $filterText)
 
                 // Sort menu
                 Menu {
@@ -196,34 +177,23 @@ struct LibraryCollectionsView: View {
                         Image(systemName: "arrow.up.arrow.down").font(.system(size: 10.5))
                         Text(sortOrder.rawValue).font(.system(size: 11.5, weight: .medium))
                     }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(.quaternary.opacity(0.6), in: Capsule())
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .liquidGlassCapsule(interactive: true)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
 
                 // Tiles / List toggle
-                HStack(spacing: 2) {
-                    ForEach(CollectionDisplayMode.allCases) { mode in
-                        Button {
-                            withAnimation(.easeOut(duration: 0.16)) { viewModeRaw = mode.rawValue }
-                        } label: {
-                            Image(systemName: mode.symbol)
-                                .font(.system(size: 12, weight: .medium))
-                                .frame(width: 26, height: 22)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(viewMode == mode ? Color.accentColor.opacity(0.18) : Color.clear)
-                                )
-                                .foregroundStyle(viewMode == mode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                        }
-                        .buttonStyle(.plain)
-                        .help(mode.label)
-                    }
-                }
-                .padding(2)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                LiquidIconPicker(
+                    options: CollectionDisplayMode.allCases,
+                    selection: Binding(
+                        get: { viewMode },
+                        set: { viewModeRaw = $0.rawValue }
+                    ),
+                    symbol: \.symbol,
+                    label: \.label
+                )
             }
 
             if kind == .playlists {
@@ -475,7 +445,7 @@ struct StationsView: View {
                 } else if let errorMessage, stations.isEmpty {
                     VStack(spacing: 10) {
                         Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
-                        Button("Retry") { Task { await refresh() } }.buttonStyle(.borderedProminent)
+                        Button("Retry") { Task { await refresh() } }.liquidGlassButton(prominent: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
                 } else if stations.isEmpty {
@@ -556,7 +526,7 @@ struct FollowingView: View {
                 } else if let errorMessage, users.isEmpty {
                     VStack(spacing: 10) {
                         Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
-                        Button("Retry") { Task { await refresh() } }.buttonStyle(.borderedProminent)
+                        Button("Retry") { Task { await refresh() } }.liquidGlassButton(prominent: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
                 } else if users.isEmpty {

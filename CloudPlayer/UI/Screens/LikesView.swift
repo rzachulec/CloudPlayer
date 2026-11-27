@@ -59,50 +59,18 @@ struct LikesView: View {
             Spacer(minLength: 12)
 
             // Instant local filter
-            HStack(spacing: 5) {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                TextField("Filter", text: $filterText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .frame(width: 130)
-                if !filterText.isEmpty {
-                    Button { filterText = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(.quaternary.opacity(0.6), in: Capsule())
+            LiquidFilterField(text: $filterText, width: 130)
 
             // View mode segmented picker (Tiles / Compact / Waveform)
-            HStack(spacing: 2) {
-                ForEach(TrackListDisplayMode.allCases) { mode in
-                    Button {
-                        withAnimation(.easeOut(duration: 0.16)) {
-                            viewModeRaw = mode.rawValue
-                        }
-                    } label: {
-                        Image(systemName: mode.symbol)
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(width: 26, height: 22)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(viewMode == mode ? Color.accentColor.opacity(0.18) : Color.clear)
-                            )
-                            .foregroundStyle(viewMode == mode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                    }
-                    .buttonStyle(.plain)
-                    .help(mode.label)
-                }
-            }
-            .padding(2)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            LiquidIconPicker(
+                options: TrackListDisplayMode.allCases,
+                selection: Binding(
+                    get: { viewMode },
+                    set: { viewModeRaw = $0.rawValue }
+                ),
+                symbol: \.symbol,
+                label: \.label
+            )
 
             if !filteredTracks.isEmpty {
                 Button {
@@ -112,16 +80,14 @@ struct LikesView: View {
                 } label: {
                     Label("Play", systemImage: "play.fill")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .liquidGlassButton(prominent: true)
 
                 Button {
                     app.audio.playShuffled(tracks: filteredTracks, contextTitle: "Likes")
                 } label: {
                     Label("Shuffle", systemImage: "shuffle")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .liquidGlassButton()
             }
         }
     }
@@ -149,7 +115,7 @@ struct LikesView: View {
                 Button("Retry") {
                     Task { await refreshFromNetwork() }
                 }
-                .buttonStyle(.borderedProminent)
+                .liquidGlassButton(prominent: true)
             }
             .frame(maxWidth: .infinity, minHeight: 280)
         } else if filteredTracks.isEmpty {

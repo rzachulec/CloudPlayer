@@ -43,26 +43,15 @@ struct HistoryView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            HStack(spacing: 2) {
-                ForEach(TrackListDisplayMode.allCases) { mode in
-                    Button {
-                        withAnimation(.easeOut(duration: 0.16)) { viewModeRaw = mode.rawValue }
-                    } label: {
-                        Image(systemName: mode.symbol)
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(width: 26, height: 22)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(viewMode == mode ? Color.accentColor.opacity(0.18) : Color.clear)
-                            )
-                            .foregroundStyle(viewMode == mode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                    }
-                    .buttonStyle(.plain)
-                    .help(mode.label)
-                }
-            }
-            .padding(2)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            LiquidIconPicker(
+                options: TrackListDisplayMode.allCases,
+                selection: Binding(
+                    get: { viewMode },
+                    set: { viewModeRaw = $0.rawValue }
+                ),
+                symbol: \.symbol,
+                label: \.label
+            )
 
             if !tracks.isEmpty {
                 Button {
@@ -72,8 +61,7 @@ struct HistoryView: View {
                 } label: {
                     Label("Play", systemImage: "play.fill")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .liquidGlassButton(prominent: true)
             }
         }
     }
@@ -93,7 +81,7 @@ struct HistoryView: View {
         } else if let errorMessage, tracks.isEmpty {
             VStack(spacing: 10) {
                 Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
-                Button("Retry") { Task { await refreshFromNetwork() } }.buttonStyle(.borderedProminent)
+                Button("Retry") { Task { await refreshFromNetwork() } }.liquidGlassButton(prominent: true)
             }
             .frame(maxWidth: .infinity, minHeight: 260)
         } else if tracks.isEmpty {

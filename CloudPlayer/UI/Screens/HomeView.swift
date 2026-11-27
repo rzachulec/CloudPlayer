@@ -54,8 +54,7 @@ struct HomeView: View {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12, weight: .medium))
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .liquidGlassButton()
             .disabled(isLoading)
             .help("Refresh Home")
         }
@@ -78,7 +77,7 @@ struct HomeView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                 Button("Retry") { Task { await refreshFromNetwork() } }
-                    .buttonStyle(.borderedProminent)
+                    .liquidGlassButton(prominent: true)
             }
             .frame(maxWidth: .infinity, minHeight: 280)
         } else {

@@ -147,7 +147,7 @@ struct ProfileView: View {
                         } label: {
                             Label("Play", systemImage: "play.fill")
                         }
-                        .buttonStyle(.borderedProminent)
+                        .liquidGlassButton(prominent: true)
                     }
 
                     if !isSelf {
@@ -164,7 +164,7 @@ struct ProfileView: View {
                                 systemImage: isFollowing ? "person.fill.checkmark" : "person.badge.plus"
                             )
                         }
-                        .buttonStyle(.bordered)
+                        .liquidGlassButton()
                         .tint(.white)
                     }
 
@@ -176,7 +176,7 @@ struct ProfileView: View {
                         } label: {
                             Image(systemName: "link")
                         }
-                        .buttonStyle(.bordered)
+                        .liquidGlassButton()
                         .tint(.white)
                         .help("Copy Profile Link")
 
@@ -185,7 +185,7 @@ struct ProfileView: View {
                         } label: {
                             Image(systemName: "safari")
                         }
-                        .buttonStyle(.bordered)
+                        .liquidGlassButton()
                         .tint(.white)
                         .help("Open on SoundCloud")
                     }
@@ -424,16 +424,14 @@ struct ProfileView: View {
                 } label: {
                     Label("Play", systemImage: "play.fill")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .liquidGlassButton(prominent: true)
 
                 Button {
                     app.audio.playShuffled(tracks: list, contextTitle: "\(user.displayName) — \(section.rawValue)")
                 } label: {
                     Label("Shuffle", systemImage: "shuffle")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .liquidGlassButton()
             }
         }
 

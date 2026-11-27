@@ -184,7 +184,7 @@ struct TrackDetailView: View {
                         } label: {
                             Label(isPlayingThis ? "Pause" : "Play", systemImage: isPlayingThis ? "pause.fill" : "play.fill")
                         }
-                        .buttonStyle(.borderedProminent)
+                        .liquidGlassButton(prominent: true)
                         .controlSize(isShort ? .regular : .large)
 
                         Button {
@@ -192,7 +192,7 @@ struct TrackDetailView: View {
                         } label: {
                             Label(isLiked ? "Liked" : "Like", systemImage: isLiked ? "heart.fill" : "heart")
                         }
-                        .buttonStyle(.bordered)
+                        .liquidGlassButton()
                         .controlSize(isShort ? .regular : .large)
                         .tint(isLiked ? .accentColor : .white)
 
@@ -200,7 +200,7 @@ struct TrackDetailView: View {
                             ShareLink(item: url) {
                                 Label("Share", systemImage: "square.and.arrow.up")
                             }
-                            .buttonStyle(.bordered)
+                            .liquidGlassButton()
                             .controlSize(isShort ? .regular : .large)
                             .tint(.white)
                         }

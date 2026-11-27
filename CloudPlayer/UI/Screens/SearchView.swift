@@ -149,8 +149,7 @@ struct SearchView: View {
                     } label: {
                         Label("Play All", systemImage: "play.fill")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .liquidGlassButton(prominent: true)
                 }
             }
 
@@ -304,7 +303,7 @@ struct SearchView: View {
                     loadedScopes.remove(scope)
                     Task { await loadCurrentScope(force: true) }
                 }
-                .buttonStyle(.borderedProminent)
+                .liquidGlassButton(prominent: true)
             }
             .frame(maxWidth: .infinity, minHeight: 260)
         } else if currentIsEmpty {

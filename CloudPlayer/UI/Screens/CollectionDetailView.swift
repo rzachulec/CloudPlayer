@@ -106,7 +106,7 @@ struct CollectionDetailView: View {
                     } label: {
                         Label("Play", systemImage: "play.fill")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .liquidGlassButton(prominent: true)
                     .controlSize(.large)
                     .disabled(tracks.isEmpty)
 
@@ -115,7 +115,7 @@ struct CollectionDetailView: View {
                     } label: {
                         Label("Shuffle", systemImage: "shuffle")
                     }
-                    .buttonStyle(.bordered)
+                    .liquidGlassButton()
                     .controlSize(.large)
                     .tint(.white)
                     .disabled(tracks.isEmpty)
@@ -124,7 +124,7 @@ struct CollectionDetailView: View {
                         ShareLink(item: url) {
                             Label("Share", systemImage: "square.and.arrow.up")
                         }
-                        .buttonStyle(.bordered)
+                        .liquidGlassButton()
                         .controlSize(.large)
                         .tint(.white)
                     }
@@ -168,7 +168,7 @@ struct CollectionDetailView: View {
         } else if let errorMessage, tracks.isEmpty {
             VStack(spacing: 10) {
                 Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
-                Button("Retry") { Task { await loadTracks() } }.buttonStyle(.borderedProminent)
+                Button("Retry") { Task { await loadTracks() } }.liquidGlassButton(prominent: true)
             }
             .frame(maxWidth: .infinity, minHeight: 200)
         } else {
