@@ -25,26 +25,24 @@ struct FocusModeView: View {
                 GeometryReader { geo in
                     let artSize = min(max(min(geo.size.width * 0.50, geo.size.height * 0.56), 180), 500)
                     let dir = app.audio.lastTransitionDirection
-                    let titleBlockHeight: CGFloat = 68
-                    let vSpacing: CGFloat = 24
                     let targetCenterX = geo.size.width / 2
-                    let targetCenterY = (geo.size.height - (titleBlockHeight + vSpacing)) / 2
+                    let targetCenterY = geo.size.height / 2 - 36
 
                     let coverScale: CGFloat = {
                         guard !expanded, let origin = originRect, artSize > 0 else { return 1.0 }
                         return origin.width / artSize
                     }()
-                    let coverOffsetX: CGFloat = {
-                        guard !expanded, let origin = originRect else { return 0 }
-                        return origin.midX - targetCenterX
+                    let coverPosX: CGFloat = {
+                        guard !expanded, let origin = originRect else { return targetCenterX }
+                        return origin.midX
                     }()
-                    let coverOffsetY: CGFloat = {
-                        guard !expanded, let origin = originRect else { return 0 }
-                        return origin.midY - targetCenterY
+                    let coverPosY: CGFloat = {
+                        guard !expanded, let origin = originRect else { return targetCenterY }
+                        return origin.midY
                     }()
 
                     ZStack {
-                        VStack(spacing: vSpacing) {
+                        ZStack {
                             Button {
                                 app.exitFocusMode()
                             } label: {
@@ -61,7 +59,7 @@ struct FocusModeView: View {
                             .onHover { isCoverHovered = $0 }
                             .help("Exit Focus Mode (Esc)")
                             .scaleEffect(coverScale)
-                            .offset(x: coverOffsetX, y: coverOffsetY)
+                            .position(x: coverPosX, y: coverPosY)
                             .opacity(originRect != nil ? 1 : (expanded ? 1 : 0))
 
                             VStack(spacing: 6) {
@@ -76,7 +74,8 @@ struct FocusModeView: View {
                                     .foregroundStyle(.white.opacity(0.72))
                                     .lineLimit(1)
                             }
-                            .frame(maxWidth: max(artSize * 1.25, 360), minHeight: titleBlockHeight, alignment: .top)
+                            .frame(maxWidth: max(artSize * 1.25, 360))
+                            .position(x: targetCenterX, y: targetCenterY + artSize / 2 + 54)
                             .opacity(expanded ? 1 : 0)
                             .offset(y: (originRect != nil && !expanded) ? 14 : 0)
                         }

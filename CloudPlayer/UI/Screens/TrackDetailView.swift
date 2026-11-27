@@ -105,7 +105,7 @@ struct TrackDetailView: View {
             HStack(alignment: .center, spacing: isCompact ? 16 : 22) {
                 GeometryReader { coverGeo in
                     Button {
-                        let rect = coverGeo.frame(in: .named("cpRootWindow"))
+                        let rect = coverGeo.frame(in: .global)
                         app.enterFocusMode(track: track, originRect: rect)
                     } label: {
                         CachedArtwork(
