@@ -139,6 +139,12 @@ actor SoundCloudAPI {
         )
     }
 
+    /// Reports a played track to SoundCloud so `/me/play-history/tracks` stays in sync across devices.
+    func recordPlayHistory(trackID: Int) async throws {
+        let payload = try JSONSerialization.data(withJSONObject: ["track_urn": "soundcloud:tracks:\(trackID)"])
+        _ = try await sendData(path: "/me/play-history", method: "POST", body: payload)
+    }
+
     func fetchPlaylist(id: Int) async throws -> SCPlaylist {
         try await get(path: "/playlists/\(id)")
     }
@@ -481,6 +487,9 @@ actor SoundCloudAPI {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.httpBody = body
+        if body != nil {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         req.setValue("OAuth \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json, text/javascript, */*; q=0.01", forHTTPHeaderField: "Accept")
         req.setValue("https://soundcloud.com", forHTTPHeaderField: "Origin")

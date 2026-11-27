@@ -248,10 +248,14 @@ final class AudioEngine {
 
     // MARK: - Internal Stream Loading & Preloading
 
+    /// Invoked whenever a new track begins playback (used to record play history).
+    var onTrackStarted: ((SCTrack) -> Void)?
+
     private func startTrack(_ track: SCTrack) {
         loadTask?.cancel()
         errorMessage = nil
         preloadedTrackID = nil
+        onTrackStarted?(track)
 
         // Optimistic immediate UI update for instant perceived response
         currentTrack = track

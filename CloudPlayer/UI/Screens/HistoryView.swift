@@ -15,6 +15,10 @@ struct HistoryView: View {
         TrackListDisplayMode(rawValue: viewModeRaw) ?? .compact
     }
 
+    private var displayedTracks: [SCTrack] {
+        deduplicate(app.sessionHistory + tracks)
+    }
+
     private let tileColumns = [GridItem(.adaptive(minimum: 165, maximum: 220), spacing: 18)]
 
     var body: some View {
@@ -53,10 +57,10 @@ struct HistoryView: View {
                 label: \.label
             )
 
-            if !tracks.isEmpty {
+            if !displayedTracks.isEmpty {
                 Button {
-                    if let first = tracks.first {
-                        app.audio.play(track: first, inContext: tracks, contextTitle: "History")
+                    if let first = displayedTracks.first {
+                        app.audio.play(track: first, inContext: displayedTracks, contextTitle: "History")
                     }
                 } label: {
                     Label("Play", systemImage: "play.fill")
@@ -68,7 +72,7 @@ struct HistoryView: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading && tracks.isEmpty {
+        if isLoading && displayedTracks.isEmpty {
             if viewMode == .tiles {
                 TileGridSkeleton()
             } else {
@@ -78,13 +82,13 @@ struct HistoryView: View {
                     }
                 }
             }
-        } else if let errorMessage, tracks.isEmpty {
+        } else if let errorMessage, displayedTracks.isEmpty {
             VStack(spacing: 10) {
                 Text(errorMessage).font(.system(size: 13)).foregroundStyle(.secondary)
                 Button("Retry") { Task { await refreshFromNetwork() } }.liquidGlassButton(prominent: true)
             }
             .frame(maxWidth: .infinity, minHeight: 260)
-        } else if tracks.isEmpty {
+        } else if displayedTracks.isEmpty {
             Text("No listening history yet.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
@@ -93,22 +97,22 @@ struct HistoryView: View {
             switch viewMode {
             case .tiles:
                 LazyVGrid(columns: tileColumns, spacing: 20) {
-                    ForEach(tracks) { track in
+                    ForEach(displayedTracks) { track in
                         NativeMediaTile(track: track, app: app) {
-                            app.audio.play(track: track, inContext: tracks, contextTitle: "History")
+                            app.audio.play(track: track, inContext: displayedTracks, contextTitle: "History")
                         }
                         .onAppear { maybeLoadMore(currentTrack: track) }
                     }
                 }
             case .compact, .waveform:
                 LazyVStack(spacing: viewMode == .waveform ? 4 : 2) {
-                    ForEach(tracks) { track in
+                    ForEach(displayedTracks) { track in
                         NativeTrackRow(
                             track: track,
                             app: app,
                             mode: viewMode,
                             onPlay: {
-                                app.audio.play(track: track, inContext: tracks, contextTitle: "History")
+                                app.audio.play(track: track, inContext: displayedTracks, contextTitle: "History")
                             },
                             onArtistTap: { user in
                                 app.router.navigate(to: .user(user))

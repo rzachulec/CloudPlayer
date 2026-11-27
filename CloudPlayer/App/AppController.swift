@@ -24,6 +24,7 @@ final class AppController {
     private(set) var isValidatingSession = false
     private(set) var lastError: String?
     var toast: NativeToast?
+    private(set) var sessionHistory: [SCTrack] = []
     var focusTrack: SCTrack?
     var isFocusVisible = false
     var focusOriginRect: CGRect?
@@ -72,6 +73,21 @@ final class AppController {
         self.audio = AudioEngine(api: client)
         self.library = LibraryStore(api: client)
         self.router = AppRouter(initial: .likes)
+        self.audio.onTrackStarted = { [weak self] track in
+            self?.recordTrackPlayed(track)
+        }
+    }
+
+    func recordTrackPlayed(_ track: SCTrack) {
+        sessionHistory.removeAll { $0.id == track.id }
+        sessionHistory.insert(track, at: 0)
+        if sessionHistory.count > 100 {
+            sessionHistory.removeLast(sessionHistory.count - 100)
+        }
+        let trackID = track.id
+        Task {
+            try? await api.recordPlayHistory(trackID: trackID)
+        }
     }
 
     func start() {
